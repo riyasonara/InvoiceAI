@@ -48,20 +48,21 @@ function App() {
         body: formData,
       });
 
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-
+      // Our API always answers with JSON — the invoice on success,
+      // or { detail: "..." } on an error status (415, 422, 500, ...).
       const data = await response.json();
 
-      // Our API returns { success: false, error } when extraction failed.
-      if (data.success === false) {
-        setError(data.error);
-      } else {
-        setInvoice(data);
-        loadInvoices(); // refresh the list to include the new/updated invoice
+      if (!response.ok) {
+        // The server rejected the request on purpose; show its message.
+        setError(data.detail || "Something went wrong while processing the file.");
+        return;
       }
+
+      // Success: data is the extracted invoice.
+      setInvoice(data);
+      loadInvoices(); // refresh the list to include the new/updated invoice
     } catch (err) {
+      // fetch only throws on a genuine network failure (server unreachable).
       setError("Could not reach the server. Is the API running on port 8000?");
     } finally {
       // Runs whether we succeeded or failed — always stop the spinner.

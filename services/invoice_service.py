@@ -10,6 +10,7 @@ def process_invoice(pdf_path):
     if text is None:
         return {
             "success": False,
+            "code": "unreadable_pdf",
             "error": "Unable to read the PDF. Please select a valid PDF file.",
         }
 

@@ -1,7 +1,7 @@
 import os
 import tempfile
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from services.invoice_service import process_invoice
@@ -35,12 +35,40 @@ def list_invoices():
     return get_all_invoices()
 
 
+# Uploads bigger than this are rejected before we do any work.
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+# Translates a service-layer error code into the HTTP status it should become.
+# The service layer stays HTTP-ignorant; this mapping lives in the web layer.
+ERROR_STATUS = {
+    "unreadable_pdf": 422,       # 422 caller sent a file we couldn't read
+    "ai_unavailable": 503,       # 503 the upstream AI provider is down
+    "invalid_ai_response": 500,  # 500 the AI returned something unusable
+}
+
+
 # When someone POSTs a PDF file to "/extract", run this function.
 # The file arrives as multipart/form-data; FastAPI hands it to us as an UploadFile.
 @app.post("/extract")
 async def extract(file: UploadFile = File(...)):
+    # Guard 1: must be a PDF. content_type is the MIME type the browser sent.
+    # (This is a cheap early filter — the real check is that read_pdf() can
+    # actually parse it, which happens downstream.)
+    if file.content_type != "application/pdf":
+        raise HTTPException(
+            status_code=415,  # 415 Unsupported Media Type
+            detail="Only PDF files are supported.",
+        )
+
     # Read the uploaded file's raw bytes into memory.
     contents = await file.read()
+
+    # Guard 2: reject files that are too large.
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,  # 413 Content Too Large
+            detail="File is too large. The maximum size is 10 MB.",
+        )
 
     # Write those bytes to a temporary file on disk, because our existing
     # read_pdf() expects a file PATH. This is the one place that knows about
@@ -51,7 +79,15 @@ async def extract(file: UploadFile = File(...)):
 
     try:
         # Hand the temp path to our existing extract -> save pipeline.
-        return process_invoice(temp_path)
+        result = process_invoice(temp_path)
     finally:
         # Always delete the temp file, even if extraction raised an error.
         os.remove(temp_path)
+
+    # Translate a service-layer failure into the right HTTP status.
+    # Unknown/missing codes default to 500 (something unexpected broke).
+    if result.get("success") is False:
+        status_code = ERROR_STATUS.get(result.get("code"), 500)
+        raise HTTPException(status_code=status_code, detail=result["error"])
+
+    return result
