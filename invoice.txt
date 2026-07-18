@@ -1,0 +1,9 @@
+ABC Electronics Pvt Ltd
+
+Invoice No: INV-1001
+
+Date: 10 July 2026
+
+GST: ₹396
+
+Total: ₹2596
