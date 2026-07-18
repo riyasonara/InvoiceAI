@@ -16,6 +16,14 @@ def create_database():
         )
     """)
 
+    # An invoice is identified by (vendor, invoice_number) together.
+    # This unique index makes the database itself reject duplicates,
+    # and gives save_invoice() a conflict target to upsert against.
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_vendor_number
+        ON invoices (vendor, invoice_number)
+    """)
+
     connection.commit()
     connection.close()
 
@@ -25,6 +33,9 @@ def save_invoice(invoice):
 
     cursor = connection.cursor()
 
+    # UPSERT: try to insert; if (vendor, invoice_number) already exists,
+    # update that existing row instead of creating a duplicate.
+    # "excluded" refers to the values we tried to insert.
     cursor.execute("""
         INSERT INTO invoices (
             vendor,
@@ -34,6 +45,11 @@ def save_invoice(invoice):
             total
         )
         VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (vendor, invoice_number)
+        DO UPDATE SET
+            invoice_date = excluded.invoice_date,
+            gst = excluded.gst,
+            total = excluded.total
     """, (
         invoice["vendor"],
         invoice["invoice_number"],

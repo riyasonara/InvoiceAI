@@ -12,3 +12,6 @@ fastapi==0.139.2
 
 # The web server that runs the FastAPI app and listens for requests
 uvicorn==0.51.0
+
+# Lets FastAPI parse uploaded files (multipart/form-data)
+python-multipart==0.0.32
