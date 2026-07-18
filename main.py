@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from services.invoice_service import process_invoice
-from services.database_service import create_database, save_invoice
+from services.database_service import create_database, get_all_invoices
 
 # Create the application — this "app" object IS our API.
 app = FastAPI()
@@ -23,16 +23,15 @@ def read_root():
     return {"message": "InvoiceAI is running"}
 
 
+# When someone GETs "/invoices", return every saved invoice.
+@app.get("/invoices")
+def list_invoices():
+    return get_all_invoices()
+
+
 # When someone POSTs an invoice to "/extract", run this function.
 # FastAPI reads the JSON body into an InvoiceRequest object for us.
+# Extraction AND saving both happen inside process_invoice now.
 @app.post("/extract")
 def extract(request: InvoiceRequest):
-    result = process_invoice(request.pdf_path)
-
-    # If extraction failed, hand the error back without saving anything.
-    if result.get("success") is False:
-        return result
-
-    # Extraction worked — persist it, then return the saved invoice.
-    save_invoice(result)
-    return result
+    return process_invoice(request.pdf_path)
