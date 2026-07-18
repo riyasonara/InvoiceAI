@@ -2,12 +2,22 @@ import os
 import tempfile
 
 from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from services.invoice_service import process_invoice
 from services.database_service import create_database, get_all_invoices
 
 # Create the application — this "app" object IS our API.
 app = FastAPI()
+
+# Allow our React dev server (a different origin) to call this API.
+# Without this, the browser blocks the requests with a CORS error.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # the Vite dev server
+    allow_methods=["*"],                       # allow GET, POST, etc.
+    allow_headers=["*"],                       # allow any request headers
+)
 
 # Make sure the invoices table exists before any request comes in.
 create_database()

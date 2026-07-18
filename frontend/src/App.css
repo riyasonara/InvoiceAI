@@ -1,0 +1,133 @@
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 20px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+h1 {
+  font-size: 40px;
+  margin: 0 0 8px;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 16px;
+}
+
+.upload-card,
+.result-card,
+.list-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.upload-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.result-card,
+.list-card {
+  margin-top: 24px;
+}
+
+.upload-card input[type="file"] {
+  font-size: 15px;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.error {
+  margin-top: 20px;
+  padding: 14px 18px;
+  background: var(--error-bg);
+  color: var(--error-text);
+  border-radius: 8px;
+  font-size: 15px;
+}
+
+.result-card h2,
+.list-card h2 {
+  margin: 0 0 16px;
+  font-size: 22px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+td {
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+/* Result card: 2-column key/value layout */
+.result-card td:first-child {
+  color: var(--text);
+  width: 40%;
+}
+
+.result-card td:last-child {
+  color: var(--text-h);
+  font-weight: 500;
+}
+
+/* List card: multi-column table with a header row */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.list-table th {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 2px solid var(--border);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.list-table td {
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--text);
+  font-size: 15px;
+  margin: 0;
+}
