@@ -1,11 +1,15 @@
 import os
+import sqlite3
 import tempfile
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr, Field
 
 from services.invoice_service import process_invoice
 from services.database_service import create_database, get_all_invoices
+from services.user_service import create_users_table, create_user, get_user_by_email
+from services.auth_service import hash_password, verify_password, create_access_token
 
 # Create the application — this "app" object IS our API.
 app = FastAPI()
@@ -19,14 +23,76 @@ app.add_middleware(
     allow_headers=["*"],                       # allow any request headers
 )
 
-# Make sure the invoices table exists before any request comes in.
+# Make sure the invoices and users tables exist before any request comes in.
 create_database()
+create_users_table()
+
+
+# What the caller must send to register. Pydantic validates both fields:
+# a real email format, and a password of at least 8 characters.
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+
+
+# What we send back. It has NO password field, so even if we accidentally
+# returned the hash, FastAPI would strip it to just these fields.
+class UserResponse(BaseModel):
+    id: int
+    email: EmailStr
+
+
+# Login just needs the credentials — no min-length check here; we only
+# validate length when *creating* a password, not when checking one.
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+# What login returns: the JWT and its type (the standard "bearer" scheme).
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 # When someone visits the home page ("/"), run this function.
 @app.get("/")
 def read_root():
     return {"message": "InvoiceAI is running"}
+
+
+# Create a new user account.
+@app.post("/register", response_model=UserResponse, status_code=201)
+def register(request: RegisterRequest):
+    # Never store the raw password — hash it first.
+    hashed = hash_password(request.password)
+
+    try:
+        return create_user(request.email, hashed)
+    except sqlite3.IntegrityError:
+        # The users.email UNIQUE constraint fired: this email is taken.
+        raise HTTPException(
+            status_code=409,  # 409 Conflict
+            detail="An account with this email already exists.",
+        )
+
+
+# Log in with email + password, receive a JWT access token.
+@app.post("/login", response_model=TokenResponse)
+def login(request: LoginRequest):
+    user = get_user_by_email(request.email)
+
+    # SECURITY: return the SAME vague error whether the email is unknown or the
+    # password is wrong. Revealing which would let an attacker discover valid
+    # emails one guess at a time.
+    if user is None or not verify_password(request.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=401,  # 401 Unauthorized
+            detail="Incorrect email or password.",
+        )
+
+    token = create_access_token(user["id"])
+    return {"access_token": token, "token_type": "bearer"}
 
 
 # When someone GETs "/invoices", return every saved invoice.

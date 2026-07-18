@@ -15,3 +15,12 @@ uvicorn==0.51.0
 
 # Lets FastAPI parse uploaded files (multipart/form-data)
 python-multipart==0.0.32
+
+# Password hashing (one-way, salted) for user authentication
+bcrypt==5.0.0
+
+# Lets Pydantic validate email address formats (EmailStr)
+email-validator==2.3.0
+
+# Create and verify JWT access tokens for login
+pyjwt==2.13.0
