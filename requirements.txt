@@ -1,0 +1,14 @@
+# Google Gemini SDK — talks to the Gemini API (services/ai_service.py)
+google-genai==2.11.0
+
+# Reads text out of PDF files (readers/pdf_reader.py)
+pypdf==6.14.2
+
+# Loads the GEMINI_API_KEY from the .env file
+python-dotenv==1.2.2
+
+# Web framework for the REST API (the "doorway" into our code)
+fastapi==0.139.2
+
+# The web server that runs the FastAPI app and listens for requests
+uvicorn==0.51.0
