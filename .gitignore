@@ -43,3 +43,7 @@ htmlcov/
 
 # Python Environment Files
 .python-version
+
+
+PROJECT_PROGRESS.md
+TODO.md
