@@ -1,14 +1,20 @@
 import os
 import sqlite3
 import tempfile
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 
 from services.invoice_service import process_invoice
-from services.database_service import create_database, get_all_invoices
+from services.database_service import (
+    create_database,
+    get_all_invoices,
+    get_invoice_by_id,
+    update_invoice,
+    get_dashboard_summary,
+)
 from services.user_service import (
     create_users_table,
     create_user,
@@ -113,6 +119,13 @@ class MeResponse(BaseModel):
     organization: OrganizationResponse
 
 
+# Fields the dashboard can change on an invoice. Literal gives free validation:
+# an invalid status is auto-rejected with 422.
+class InvoiceUpdate(BaseModel):
+    status: Optional[Literal["paid", "pending", "unpaid"]] = None
+    due_date: Optional[str] = None
+
+
 # Login just needs the credentials — no min-length check here; we only
 # validate length when *creating* a password, not when checking one.
 class LoginRequest(BaseModel):
@@ -214,11 +227,57 @@ def read_me(current_user: dict = Depends(get_current_user)):
     }
 
 
-# When someone GETs "/invoices", return every saved invoice.
-# Depends(get_current_user) makes this require a valid token.
+# List this org's invoices, with optional search / status / date-range filters.
 @app.get("/invoices")
-def list_invoices(current_user: dict = Depends(get_current_user)):
-    return get_all_invoices(current_user["org_id"])
+def list_invoices(
+    current_user: dict = Depends(get_current_user),
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+):
+    return get_all_invoices(
+        current_user["org_id"],
+        search=search,
+        status=status,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
+# Aggregated stats for the dashboard cards + charts (org-scoped).
+@app.get("/dashboard/summary")
+def dashboard_summary(current_user: dict = Depends(get_current_user)):
+    return get_dashboard_summary(current_user["org_id"])
+
+
+# A single invoice's details (org-scoped).
+@app.get("/invoices/{invoice_id}")
+def read_invoice(invoice_id: int, current_user: dict = Depends(get_current_user)):
+    invoice = get_invoice_by_id(current_user["org_id"], invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+    return invoice
+
+
+# Update an invoice's status / due date (org-scoped). Returns the updated row.
+@app.patch("/invoices/{invoice_id}")
+def patch_invoice(
+    invoice_id: int,
+    update: InvoiceUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    invoice = get_invoice_by_id(current_user["org_id"], invoice_id)
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+
+    update_invoice(
+        current_user["org_id"],
+        invoice_id,
+        status=update.status,
+        due_date=update.due_date,
+    )
+    return get_invoice_by_id(current_user["org_id"], invoice_id)
 
 
 # Uploads bigger than this are rejected before we do any work.
