@@ -3,7 +3,7 @@ from services.ai_service import extract_invoice
 from services.database_service import save_invoice
 
 
-def process_invoice(pdf_path):
+def process_invoice(pdf_path, user_id):
     # Read the PDF file
     text = read_pdf(pdf_path)
 
@@ -25,6 +25,6 @@ def process_invoice(pdf_path):
     if result.get("success") is False:
         return result
 
-    # Extraction worked — persist it once, then return it.
-    save_invoice(result)
+    # Extraction worked — persist it under the current owner, then return it.
+    save_invoice(result, user_id)
     return result

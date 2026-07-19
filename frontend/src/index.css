@@ -1,40 +1,70 @@
 :root {
-  --text: #4b5563;
-  --text-h: #111827;
-  --bg: #f4f5f7;
-  --card-bg: #ffffff;
-  --border: #e5e7eb;
-  --accent: #1e6f5c;
-  --accent-hover: #185a4b;
-  --error-bg: #fdecea;
-  --error-text: #a33a3a;
+  color-scheme: light dark;
 
-  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
-  color: var(--text);
-  background: var(--bg);
-  -webkit-font-smoothing: antialiased;
+  /* ---- Light theme (default) ---- */
+  --bg: #f5f7f7;
+  --bg-glow: rgba(13, 148, 136, 0.10);
+  --surface: #ffffff;
+  --surface-2: #eef2f2;
+  --border: #e2e8e7;
+  --border-strong: #cfd8d7;
+  --text: #0f1a18;
+  --text-muted: #5c6b68;
+  --accent: #0d9488;
+  --accent-hover: #0b7f75;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(13, 148, 136, 0.12);
+  --error-bg: #fdeaea;
+  --error-text: #b42318;
+  --error-border: #f3c6c6;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 12px 32px -14px rgba(0, 0, 0, 0.18);
+
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #0f1210;
-    --card-bg: #171f19;
-    --border: #2a342c;
-    --accent: #57c8a4;
-    --accent-hover: #6bd6b4;
-    --error-bg: #3a2424;
-    --error-text: #e08585;
+    --bg: #0a0d0c;
+    --bg-glow: rgba(22, 184, 166, 0.16);
+    --surface: #141a19;
+    --surface-2: #1c2322;
+    --border: #262e2d;
+    --border-strong: #333d3b;
+    --text: #e9eeed;
+    --text-muted: #98a4a1;
+    --accent: #17b8a6;
+    --accent-hover: #2ad0bd;
+    --accent-contrast: #04231f;
+    --accent-soft: rgba(22, 184, 166, 0.15);
+    --error-bg: #2a1919;
+    --error-text: #f0a5a5;
+    --error-border: #4a2c2c;
+
+    --shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.65);
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-h1, h2 {
-  color: var(--text-h);
-  font-weight: 600;
+h1,
+h2,
+h3 {
+  color: var(--text);
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }

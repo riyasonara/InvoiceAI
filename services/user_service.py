@@ -53,3 +53,21 @@ def get_user_by_email(email):
         return None
 
     return {"id": row[0], "email": row[1], "hashed_password": row[2]}
+
+
+def get_user_by_id(user_id):
+    """Return the user dict for a given id, or None if not found."""
+    connection = sqlite3.connect("invoice.db")
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "SELECT id, email, hashed_password FROM users WHERE id = ?",
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    connection.close()
+
+    if row is None:
+        return None
+
+    return {"id": row[0], "email": row[1], "hashed_password": row[2]}
