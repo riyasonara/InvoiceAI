@@ -372,3 +372,112 @@ tr:last-child td {
   font-size: 14.5px;
   margin: 0;
 }
+
+/* Header workspace pill */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.workspace-pill {
+  padding: 4px 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Segmented create/join toggle on the register form */
+.seg {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.seg-btn {
+  flex: 1;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.seg-btn.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+/* Invite-teammates card */
+.invite-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.invite-label {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.invite-hint {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.invite-code-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.invite-code-box code {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+
+.copy-btn {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.copy-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}

@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import tempfile
+from typing import Optional
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,13 @@ from services.user_service import (
     create_user,
     get_user_by_email,
     get_user_by_id,
+)
+from services.organization_service import (
+    create_organizations_table,
+    create_organization,
+    backfill_user_orgs,
+    get_organization_by_id,
+    get_organization_by_invite_code,
 )
 from services.auth_service import (
     hash_password,
@@ -35,9 +43,13 @@ app.add_middleware(
     allow_headers=["*"],                       # allow any request headers
 )
 
-# Make sure the invoices and users tables exist before any request comes in.
-create_database()
+# Ensure all tables exist before any request comes in. Order matters:
+# organizations first, then users (adds org_id), then backfill existing users
+# into personal orgs, then invoices.
+create_organizations_table()
 create_users_table()
+backfill_user_orgs()
+create_database()
 
 
 def get_current_user(access_token: str | None = Cookie(default=None)):
@@ -72,9 +84,13 @@ def get_current_user(access_token: str | None = Cookie(default=None)):
 
 # What the caller must send to register. Pydantic validates both fields:
 # a real email format, and a password of at least 8 characters.
+# Register either CREATES a new org (organization_name) or JOINS one
+# (invite_code). Both are optional here; the endpoint enforces "exactly one".
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
+    organization_name: Optional[str] = None
+    invite_code: Optional[str] = None
 
 
 # What we send back. It has NO password field, so even if we accidentally
@@ -82,6 +98,19 @@ class RegisterRequest(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: EmailStr
+
+
+class OrganizationResponse(BaseModel):
+    id: int
+    name: str
+    invite_code: str
+
+
+# The logged-in user together with their organization (name + shareable code).
+class MeResponse(BaseModel):
+    id: int
+    email: EmailStr
+    organization: OrganizationResponse
 
 
 # Login just needs the credentials — no min-length check here; we only
@@ -100,22 +129,43 @@ def read_root():
 # Create a new user account.
 @app.post("/register", response_model=UserResponse, status_code=201)
 def register(request: RegisterRequest):
-    # Never store the raw password — hash it first.
-    hashed = hash_password(request.password)
-
-    try:
-        return create_user(request.email, hashed)
-    except sqlite3.IntegrityError:
-        # The users.email UNIQUE constraint fired: this email is taken.
+    # Fail early on a taken email so we don't create an orphan organization.
+    if get_user_by_email(request.email) is not None:
         raise HTTPException(
             status_code=409,  # 409 Conflict
             detail="An account with this email already exists.",
         )
 
+    # Decide which organization this user joins.
+    if request.invite_code:
+        # JOIN an existing org via its invite code.
+        org = get_organization_by_invite_code(request.invite_code)
+        if org is None:
+            raise HTTPException(status_code=400, detail="Invalid invite code.")
+    elif request.organization_name:
+        # CREATE a brand-new org; this user is its first member.
+        org = create_organization(request.organization_name)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide an organization name to create a workspace, or an invite code to join one.",
+        )
+
+    # Never store the raw password — hash it first.
+    hashed = hash_password(request.password)
+
+    try:
+        return create_user(request.email, hashed, org["id"])
+    except sqlite3.IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists.",
+        )
+
 
 # Log in with email + password. On success, sets the JWT in an httpOnly cookie
-# and returns the user (the token itself never touches the response body).
-@app.post("/login", response_model=UserResponse)
+# and returns the user + their organization (the token never touches the body).
+@app.post("/login", response_model=MeResponse)
 def login(request: LoginRequest, response: Response):
     user = get_user_by_email(request.email)
 
@@ -141,7 +191,8 @@ def login(request: LoginRequest, response: Response):
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # cookie expires with the token
     )
 
-    return {"id": user["id"], "email": user["email"]}
+    org = get_organization_by_id(user["org_id"])
+    return {"id": user["id"], "email": user["email"], "organization": org}
 
 
 # Log out by clearing the auth cookie. Because the cookie is httpOnly, only the
@@ -152,18 +203,22 @@ def logout(response: Response):
     return {"message": "Logged out."}
 
 
-# Return the currently logged-in user. Depends(get_current_user) makes this
-# endpoint require a valid bearer token — our first PROTECTED route.
-@app.get("/me", response_model=UserResponse)
+# Return the currently logged-in user together with their organization.
+@app.get("/me", response_model=MeResponse)
 def read_me(current_user: dict = Depends(get_current_user)):
-    return current_user
+    org = get_organization_by_id(current_user["org_id"])
+    return {
+        "id": current_user["id"],
+        "email": current_user["email"],
+        "organization": org,
+    }
 
 
 # When someone GETs "/invoices", return every saved invoice.
 # Depends(get_current_user) makes this require a valid token.
 @app.get("/invoices")
 def list_invoices(current_user: dict = Depends(get_current_user)):
-    return get_all_invoices(current_user["id"])
+    return get_all_invoices(current_user["org_id"])
 
 
 # Uploads bigger than this are rejected before we do any work.
@@ -213,8 +268,8 @@ async def extract(
 
     try:
         # Hand the temp path to our extract -> save pipeline, tagged with the
-        # current user so the invoice is saved under their account.
-        result = process_invoice(temp_path, current_user["id"])
+        # uploader and their organization (the tenant that owns the invoice).
+        result = process_invoice(temp_path, current_user["id"], current_user["org_id"])
     finally:
         # Always delete the temp file, even if extraction raised an error.
         os.remove(temp_path)

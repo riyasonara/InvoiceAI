@@ -5,11 +5,13 @@ def create_database():
     connection = sqlite3.connect("invoice.db")
     cursor = connection.cursor()
 
-    # Fresh installs get user_id from the start.
+    # Fresh installs get both user_id (who uploaded it) and org_id (the tenant
+    # that owns it) from the start.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS invoices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
+            org_id INTEGER,
             vendor TEXT,
             invoice_number TEXT,
             invoice_date TEXT,
@@ -18,49 +20,56 @@ def create_database():
         )
     """)
 
-    # Migration for databases created before user_id existed: add the column
-    # if it's missing. ALTER TABLE appends it at the end, but we always select
-    # columns by name, so its physical position never matters.
+    # Migration: add org_id if the table predates organizations.
     existing_columns = [row[1] for row in cursor.execute("PRAGMA table_info(invoices)")]
-    if "user_id" not in existing_columns:
-        cursor.execute("ALTER TABLE invoices ADD COLUMN user_id INTEGER")
+    if "org_id" not in existing_columns:
+        cursor.execute("ALTER TABLE invoices ADD COLUMN org_id INTEGER")
 
-    # Uniqueness is now PER OWNER: the same (vendor, invoice_number) can exist
-    # for different users, but not twice within one account. Replace the old
-    # global index with a composite one that includes user_id.
-    cursor.execute("DROP INDEX IF EXISTS idx_invoices_vendor_number")
+    # Backfill each invoice's org_id from the org of the user who uploaded it.
     cursor.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_user_vendor_number
-        ON invoices (user_id, vendor, invoice_number)
+        UPDATE invoices
+        SET org_id = (SELECT org_id FROM users WHERE users.id = invoices.user_id)
+        WHERE org_id IS NULL
+    """)
+
+    # Uniqueness is now PER ORGANIZATION: teammates can't create duplicates of
+    # the same invoice within their org. Replace the old per-user index.
+    cursor.execute("DROP INDEX IF EXISTS idx_invoices_user_vendor_number")
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_org_vendor_number
+        ON invoices (org_id, vendor, invoice_number)
     """)
 
     connection.commit()
     connection.close()
 
 
-def save_invoice(invoice, user_id):
+def save_invoice(invoice, user_id, org_id):
     connection = sqlite3.connect("invoice.db")
     cursor = connection.cursor()
 
-    # UPSERT scoped to the owner: the conflict target is now
-    # (user_id, vendor, invoice_number).
+    # UPSERT scoped to the organization: conflict target is
+    # (org_id, vendor, invoice_number). user_id records the latest uploader.
     cursor.execute("""
         INSERT INTO invoices (
             user_id,
+            org_id,
             vendor,
             invoice_number,
             invoice_date,
             gst,
             total
         )
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (user_id, vendor, invoice_number)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (org_id, vendor, invoice_number)
         DO UPDATE SET
             invoice_date = excluded.invoice_date,
             gst = excluded.gst,
-            total = excluded.total
+            total = excluded.total,
+            user_id = excluded.user_id
     """, (
         user_id,
+        org_id,
         invoice["vendor"],
         invoice["invoice_number"],
         invoice["invoice_date"],
@@ -72,18 +81,17 @@ def save_invoice(invoice, user_id):
     connection.close()
 
 
-def get_all_invoices(user_id):
+def get_all_invoices(org_id):
     connection = sqlite3.connect("invoice.db")
     cursor = connection.cursor()
 
-    # Explicit columns (not SELECT *) so the order is guaranteed. Return only
-    # THIS user's invoices, newest first.
+    # Return every invoice belonging to THIS organization, newest first.
     cursor.execute("""
         SELECT id, vendor, invoice_number, invoice_date, gst, total
         FROM invoices
-        WHERE user_id = ?
+        WHERE org_id = ?
         ORDER BY id DESC
-    """, (user_id,))
+    """, (org_id,))
     rows = cursor.fetchall()
 
     connection.close()

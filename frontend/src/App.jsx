@@ -4,12 +4,10 @@ import "./App.css";
 const API_URL = "http://localhost:8000";
 
 // Every request goes through here so it ALWAYS sends the httpOnly cookie.
-// Without credentials:"include", the browser won't attach the cookie cross-origin.
 function api(path, options = {}) {
   return fetch(`${API_URL}${path}`, { credentials: "include", ...options });
 }
 
-// Reusable brand mark (logo + wordmark), used on both the auth and app screens.
 function Brand() {
   return (
     <div className="brand">
@@ -30,9 +28,6 @@ function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
 
-  // On load, ask "who am I?". The cookie (if present and valid) answers via /me.
-  // This is how an httpOnly cookie "remembers" you across refreshes — the JS
-  // never sees the token; it just asks the server whether the cookie is good.
   useEffect(() => {
     api("/me")
       .then((res) => (res.ok ? res.json() : null))
@@ -63,14 +58,15 @@ function App() {
 
 function AuthScreen({ onAuthenticated }) {
   const [mode, setMode] = useState("login"); // "login" | "register"
+  const [orgMode, setOrgMode] = useState("create"); // "create" | "join"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   function readError(data) {
-    // Login errors send { detail: "..." }; validation errors send
-    // { detail: [{ msg, ... }] }. Handle both shapes.
     if (Array.isArray(data.detail)) return data.detail[0]?.msg || "Invalid input.";
     return data.detail || "Something went wrong.";
   }
@@ -80,11 +76,18 @@ function AuthScreen({ onAuthenticated }) {
     setLoading(true);
     setError("");
 
+    // Build the request body. Register also carries the workspace choice.
+    const body = { email, password };
+    if (mode === "register") {
+      if (orgMode === "create") body.organization_name = organizationName;
+      else body.invite_code = inviteCode;
+    }
+
     try {
       const res = await api(`/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
 
@@ -93,8 +96,7 @@ function AuthScreen({ onAuthenticated }) {
         return;
       }
 
-      // /register creates the account but does NOT set the cookie. For a smooth
-      // experience, log in automatically right after a successful registration.
+      // /register doesn't set the cookie, so log in right after to start a session.
       if (mode === "register") {
         const loginRes = await api("/login", {
           method: "POST",
@@ -109,7 +111,7 @@ function AuthScreen({ onAuthenticated }) {
         }
         onAuthenticated(loginData);
       } else {
-        onAuthenticated(data); // /login set the cookie and returned the user
+        onAuthenticated(data);
       }
     } catch {
       setError("Could not reach the server. Is the API running on port 8000?");
@@ -127,8 +129,8 @@ function AuthScreen({ onAuthenticated }) {
         <h1 className="auth-title">{isLogin ? "Welcome back" : "Create your account"}</h1>
         <p className="auth-subtitle">
           {isLogin
-            ? "Log in to access your invoices."
-            : "Start extracting invoice data in seconds."}
+            ? "Log in to access your workspace."
+            : "Start a workspace or join your team."}
         </p>
 
         <form className="auth-form" onSubmit={handleSubmit}>
@@ -155,6 +157,51 @@ function AuthScreen({ onAuthenticated }) {
               required
             />
           </label>
+
+          {!isLogin && (
+            <>
+              <div className="seg">
+                <button
+                  type="button"
+                  className={orgMode === "create" ? "seg-btn active" : "seg-btn"}
+                  onClick={() => setOrgMode("create")}
+                >
+                  Create workspace
+                </button>
+                <button
+                  type="button"
+                  className={orgMode === "join" ? "seg-btn active" : "seg-btn"}
+                  onClick={() => setOrgMode("join")}
+                >
+                  Join with code
+                </button>
+              </div>
+
+              {orgMode === "create" ? (
+                <label className="field">
+                  <span className="field-label">Organization name</span>
+                  <input
+                    type="text"
+                    placeholder="Acme Inc"
+                    value={organizationName}
+                    onChange={(e) => setOrganizationName(e.target.value)}
+                    required
+                  />
+                </label>
+              ) : (
+                <label className="field">
+                  <span className="field-label">Invite code</span>
+                  <input
+                    type="text"
+                    placeholder="Paste your team's invite code"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    required
+                  />
+                </label>
+              )}
+            </>
+          )}
 
           {error && <div className="error">{error}</div>}
 
@@ -187,6 +234,9 @@ function Dashboard({ user, onLogout }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState([]);
+  const [copied, setCopied] = useState(false);
+
+  const org = user.organization;
 
   async function loadInvoices() {
     try {
@@ -200,6 +250,12 @@ function Dashboard({ user, onLogout }) {
   useEffect(() => {
     loadInvoices();
   }, []);
+
+  function copyInvite() {
+    navigator.clipboard?.writeText(org.invite_code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
 
   async function handleUpload() {
     if (!file) return;
@@ -232,7 +288,10 @@ function Dashboard({ user, onLogout }) {
   return (
     <div className="app">
       <header className="app-header">
-        <Brand />
+        <div className="header-left">
+          <Brand />
+          <span className="workspace-pill">{org.name}</span>
+        </div>
         <div className="user-box">
           <span className="user-email">{user.email}</span>
           <button type="button" className="logout" onClick={onLogout}>
@@ -245,6 +304,19 @@ function Dashboard({ user, onLogout }) {
         <div className="page-head">
           <h1>Extract invoice data</h1>
           <p className="subtitle">Upload a PDF and let AI pull out the vendor, dates, and totals.</p>
+        </div>
+
+        <div className="invite-card">
+          <div className="invite-text">
+            <span className="invite-label">Invite teammates</span>
+            <p className="invite-hint">Share this code so colleagues can join {org.name}.</p>
+          </div>
+          <div className="invite-code-box">
+            <code>{org.invite_code}</code>
+            <button type="button" className="copy-btn" onClick={copyInvite}>
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
         </div>
 
         <div className="upload-card">
@@ -286,7 +358,7 @@ function Dashboard({ user, onLogout }) {
 
         <div className="list-card">
           <div className="list-head">
-            <h2>Your invoices</h2>
+            <h2>Workspace invoices</h2>
             <span className="count-badge">{invoices.length}</span>
           </div>
           {invoices.length === 0 ? (
