@@ -1,8 +1,12 @@
 import secrets
 import sqlite3
 
+from db import SessionLocal
+from models import Organization
+
 
 def create_organizations_table():
+    # DDL stays raw for now; the Organization ORM model maps onto this table.
     connection = sqlite3.connect("invoice.db")
     cursor = connection.cursor()
 
@@ -19,62 +23,45 @@ def create_organizations_table():
     connection.close()
 
 
+def _to_dict(org: Organization) -> dict:
+    return {"id": org.id, "name": org.name, "invite_code": org.invite_code}
+
+
 def create_organization(name):
     """Create a new organization with a random, shareable invite code."""
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    invite_code = secrets.token_urlsafe(8)
-    cursor.execute(
-        "INSERT INTO organizations (name, invite_code) VALUES (?, ?)",
-        (name, invite_code),
-    )
-
-    connection.commit()
-    org_id = cursor.lastrowid
-    connection.close()
-
-    return {"id": org_id, "name": name, "invite_code": invite_code}
+    db = SessionLocal()
+    try:
+        org = Organization(name=name, invite_code=secrets.token_urlsafe(8))
+        db.add(org)
+        db.commit()
+        db.refresh(org)
+        return _to_dict(org)
+    finally:
+        db.close()
 
 
 def get_organization_by_id(org_id):
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    cursor.execute(
-        "SELECT id, name, invite_code FROM organizations WHERE id = ?",
-        (org_id,),
-    )
-    row = cursor.fetchone()
-    connection.close()
-
-    if row is None:
-        return None
-
-    return {"id": row[0], "name": row[1], "invite_code": row[2]}
+    db = SessionLocal()
+    try:
+        org = db.query(Organization).filter_by(id=org_id).first()
+        return _to_dict(org) if org else None
+    finally:
+        db.close()
 
 
 def get_organization_by_invite_code(invite_code):
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    cursor.execute(
-        "SELECT id, name, invite_code FROM organizations WHERE invite_code = ?",
-        (invite_code,),
-    )
-    row = cursor.fetchone()
-    connection.close()
-
-    if row is None:
-        return None
-
-    return {"id": row[0], "name": row[1], "invite_code": row[2]}
+    db = SessionLocal()
+    try:
+        org = db.query(Organization).filter_by(invite_code=invite_code).first()
+        return _to_dict(org) if org else None
+    finally:
+        db.close()
 
 
 def backfill_user_orgs():
     """Migration: every user created before organizations existed gets their
     own personal org, so no one is left without a tenant. Runs once — after
-    the first pass, no users have a NULL org_id.
+    the first pass, no users have a NULL org_id. (Raw SQL migration.)
     """
     connection = sqlite3.connect("invoice.db")
     cursor = connection.cursor()

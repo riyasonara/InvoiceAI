@@ -24,3 +24,12 @@ email-validator==2.3.0
 
 # Create and verify JWT access tokens for login
 pyjwt==2.13.0
+
+# ORM — maps tables to Python classes; DATABASE_URL makes Postgres a config swap
+SQLAlchemy==2.0.51
+
+# Gmail OAuth flow + Gmail API client
+google-auth-oauthlib==1.4.0
+google-api-python-client==2.198.0
+# Encrypt stored OAuth tokens at rest (Fernet)
+cryptography==49.0.0

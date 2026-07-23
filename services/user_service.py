@@ -1,7 +1,14 @@
 import sqlite3
 
+from sqlalchemy.exc import IntegrityError
+
+from db import SessionLocal
+from models import User
+
 
 def create_users_table():
+    # Schema creation + migration still owns the DDL (raw SQL) for now.
+    # The ORM models in models.py map onto exactly this table.
     connection = sqlite3.connect("invoice.db")
     cursor = connection.cursor()
 
@@ -25,56 +32,50 @@ def create_users_table():
     connection.close()
 
 
+def _to_dict(user: User) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "hashed_password": user.hashed_password,
+        "org_id": user.org_id,
+    }
+
+
 def create_user(email, hashed_password, org_id):
-    """Insert a new user into an organization. Raises sqlite3.IntegrityError if
-    the email is taken (the UNIQUE constraint), handled by the register endpoint.
+    """Insert a new user into an organization.
+
+    A duplicate email violates the UNIQUE constraint and raises SQLAlchemy's
+    IntegrityError, which the register endpoint catches and turns into a 409.
     """
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    cursor.execute(
-        "INSERT INTO users (email, hashed_password, org_id) VALUES (?, ?, ?)",
-        (email, hashed_password, org_id),
-    )
-
-    connection.commit()
-    user_id = cursor.lastrowid
-    connection.close()
-
-    return {"id": user_id, "email": email, "org_id": org_id}
+    db = SessionLocal()
+    try:
+        user = User(email=email, hashed_password=hashed_password, org_id=org_id)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return {"id": user.id, "email": user.email, "org_id": user.org_id}
+    except IntegrityError:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def get_user_by_email(email):
     """Return the user dict (including hashed_password) or None if not found."""
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    cursor.execute(
-        "SELECT id, email, hashed_password, org_id FROM users WHERE email = ?",
-        (email,),
-    )
-    row = cursor.fetchone()
-    connection.close()
-
-    if row is None:
-        return None
-
-    return {"id": row[0], "email": row[1], "hashed_password": row[2], "org_id": row[3]}
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(email=email).first()
+        return _to_dict(user) if user else None
+    finally:
+        db.close()
 
 
 def get_user_by_id(user_id):
     """Return the user dict for a given id, or None if not found."""
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    cursor.execute(
-        "SELECT id, email, hashed_password, org_id FROM users WHERE id = ?",
-        (user_id,),
-    )
-    row = cursor.fetchone()
-    connection.close()
-
-    if row is None:
-        return None
-
-    return {"id": row[0], "email": row[1], "hashed_password": row[2], "org_id": row[3]}
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter_by(id=user_id).first()
+        return _to_dict(user) if user else None
+    finally:
+        db.close()

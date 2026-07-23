@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from typing import Optional
 import os
 import json
+import time
 
 # Load environment variables
 load_dotenv()
@@ -67,37 +68,48 @@ def _extract_json(text):
     return text[start:end + 1]
 
 
+MAX_ATTEMPTS = 3
+
+
 def _generate_invoice_json(contents):
     """Call Gemini with the given contents (text and/or file parts), constrained
     to JSON output, then validate/normalize the result through ExtractedInvoice.
     Returns a clean invoice dict — or a structured error dict. Both the text and
     vision paths funnel through here, so parsing and error handling live once.
+
+    Gemini occasionally returns transient 503 "high demand" errors — those are
+    retried with a short backoff before giving up.
     """
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            ),
-        )
-        raw = json.loads(_extract_json(response.text))
-        # Coerce the raw AI output into clean, typed fields.
-        return ExtractedInvoice(**raw).model_dump()
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-flash-latest",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                ),
+            )
+            raw = json.loads(_extract_json(response.text))
+            # Coerce the raw AI output into clean, typed fields.
+            return ExtractedInvoice(**raw).model_dump()
 
-    except ServerError:
-        return {
-            "success": False,
-            "code": "ai_unavailable",
-            "error": "Gemini service is temporarily unavailable. Please try again later."
-        }
+        except ServerError:
+            # Transient overload/outage on Google's side — back off and retry.
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(2 * attempt)
+                continue
+            return {
+                "success": False,
+                "code": "ai_unavailable",
+                "error": "Gemini service is temporarily unavailable. Please try again later."
+            }
 
-    except (json.JSONDecodeError, ValidationError, TypeError):
-        return {
-            "success": False,
-            "code": "invalid_ai_response",
-            "error": "Gemini returned invalid JSON."
-        }
+        except (json.JSONDecodeError, ValidationError, TypeError):
+            return {
+                "success": False,
+                "code": "invalid_ai_response",
+                "error": "Gemini returned invalid JSON."
+            }
 
 
 def extract_invoice(prompt, invoice_text):
@@ -107,9 +119,14 @@ def extract_invoice(prompt, invoice_text):
     return _generate_invoice_json(prompt + "\n" + invoice_text)
 
 
-def extract_invoice_from_pdf(prompt, pdf_bytes):
-    """VISION path: used for scanned/photo PDFs that have no text layer. We send
-    the PDF itself so Gemini reads the pixels (OCR + extraction in one step).
+def extract_invoice_from_file(prompt, file_bytes, mime_type):
+    """VISION path for any supported file (PDF or image): send the raw bytes to
+    Gemini with the correct mime type so it reads the pixels (OCR + extraction).
     """
-    pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
-    return _generate_invoice_json([prompt, pdf_part])
+    part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
+    return _generate_invoice_json([prompt, part])
+
+
+def extract_invoice_from_pdf(prompt, pdf_bytes):
+    """VISION path for scanned/photo PDFs (kept for the existing upload flow)."""
+    return extract_invoice_from_file(prompt, pdf_bytes, "application/pdf")

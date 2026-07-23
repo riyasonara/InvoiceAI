@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import { Box, CircularProgress } from "@mui/material";
 import { api } from "./api";
+import type { CurrentUser } from "./types";
 import Layout from "./components/Layout";
 import AuthScreen from "./pages/AuthScreen";
 import DashboardPage from "./pages/DashboardPage";
@@ -8,18 +10,18 @@ import InvoicesPage from "./pages/InvoicesPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import ReportsPage from "./pages/ReportsPage";
-import "./App.css";
-import "./dashboard.css";
+import SettingsPage from "./pages/SettingsPage";
+import EmailsPage from "./pages/EmailsPage";
 
 export default function App() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<CurrentUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
 
   // On load, ask "who am I?" — the httpOnly cookie (if valid) answers via /me.
   useEffect(() => {
     api("/me")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setUser(data))
+      .then((data) => setUser(data as CurrentUser | null))
       .catch(() => setUser(null))
       .finally(() => setAuthChecked(true));
   }, []);
@@ -30,7 +32,11 @@ export default function App() {
   }
 
   if (!authChecked) {
-    return <div className="auth-page"><p className="loading">Loading…</p></div>;
+    return (
+      <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <CircularProgress />
+      </Box>
+    );
   }
 
   if (!user) {
@@ -45,6 +51,8 @@ export default function App() {
         <Route path="invoices/:id" element={<InvoiceDetailPage />} />
         <Route path="suppliers" element={<SuppliersPage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="emails" element={<EmailsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

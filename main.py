@@ -1,11 +1,26 @@
 import os
-import sqlite3
+import secrets
 import tempfile
 from typing import Optional, Literal
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.exc import IntegrityError
+
+from services import gmail_service
+from services import processing_service
+from services.email_service import (
+    create_email_tables,
+    upsert_email_account,
+    get_email_account,
+    delete_email_account,
+    sync_gmail,
+    list_email_messages,
+    get_email_message,
+    get_email_stats,
+)
 
 from services.invoice_service import process_invoice
 from services.database_service import (
@@ -56,6 +71,10 @@ create_organizations_table()
 create_users_table()
 backfill_user_orgs()
 create_database()
+create_email_tables()
+
+# Where to send the user's browser back to after the Gmail OAuth callback.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 
 def get_current_user(access_token: str | None = Cookie(default=None)):
@@ -169,7 +188,8 @@ def register(request: RegisterRequest):
 
     try:
         return create_user(request.email, hashed, org["id"])
-    except sqlite3.IntegrityError:
+    except IntegrityError:
+        # The users.email UNIQUE constraint fired (a race past the pre-check).
         raise HTTPException(
             status_code=409,
             detail="An account with this email already exists.",
@@ -216,6 +236,111 @@ def logout(response: Response):
     return {"message": "Logged out."}
 
 
+# ===== Gmail integration — Feature 1: OAuth (connect / callback / status / disconnect) =====
+
+@app.get("/gmail/connect")
+def gmail_connect(response: Response, current_user: dict = Depends(get_current_user)):
+    """Return the Google consent URL. Frontend redirects the browser there."""
+    if not gmail_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail integration is not configured on the server.",
+        )
+    # CSRF: a random state stored in an httpOnly cookie and echoed via the URL.
+    state = secrets.token_urlsafe(16)
+    response.set_cookie(
+        key="gmail_oauth_state", value=state,
+        httponly=True, samesite="lax", secure=False, max_age=600,
+    )
+    return {"auth_url": gmail_service.build_auth_url(state)}
+
+
+@app.get("/gmail/callback")
+def gmail_callback(
+    code: str = "",
+    state: str = "",
+    gmail_oauth_state: Optional[str] = Cookie(default=None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Google redirects here after consent. Verify state, exchange the code,
+    store the (encrypted) tokens, then bounce back to the frontend.
+    """
+    if not state or state != gmail_oauth_state:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state.")
+
+    tokens = gmail_service.exchange_code(code)
+    upsert_email_account(
+        current_user["org_id"], tokens["email"],
+        tokens["access_token"], tokens["refresh_token"], tokens["expiry"],
+    )
+
+    redirect = RedirectResponse(url=f"{FRONTEND_URL}/settings?gmail=connected")
+    redirect.delete_cookie(key="gmail_oauth_state")
+    return redirect
+
+
+@app.get("/gmail/status")
+def gmail_status(current_user: dict = Depends(get_current_user)):
+    """Whether this org has a connected Gmail (and whether the server is configured)."""
+    account = get_email_account(current_user["org_id"])
+    if account is None:
+        return {"connected": False, "configured": gmail_service.is_configured()}
+    return {
+        "connected": True,
+        "email": account["email_address"],
+        "connected_at": account["connected_at"],
+        "configured": True,
+    }
+
+
+@app.post("/gmail/disconnect")
+def gmail_disconnect(current_user: dict = Depends(get_current_user)):
+    delete_email_account(current_user["org_id"])
+    return {"message": "Gmail disconnected."}
+
+
+# ===== Gmail integration — Feature 2: sync =====
+
+@app.post("/emails/sync")
+def emails_sync(current_user: dict = Depends(get_current_user)):
+    """Pull unread emails with invoice attachments into the workspace."""
+    result = sync_gmail(current_user["org_id"])
+    if result is None:
+        raise HTTPException(status_code=400, detail="No Gmail account connected.")
+    return result
+
+
+@app.get("/emails")
+def emails_list(current_user: dict = Depends(get_current_user)):
+    """This org's synced emails, each with its attachments."""
+    return list_email_messages(current_user["org_id"])
+
+
+@app.get("/emails/{email_id}")
+def emails_detail(email_id: int, current_user: dict = Depends(get_current_user)):
+    """A single synced email with its attachments (org-scoped)."""
+    message = get_email_message(current_user["org_id"], email_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="Email not found.")
+    return message
+
+
+# ===== Gmail integration — Feature 3: processing pipeline =====
+
+@app.post("/processing/run")
+def processing_run(current_user: dict = Depends(get_current_user)):
+    """Process every pending attachment into invoices. (Synchronous for now;
+    swap process_pending's loop for a queue without touching process_attachment.)
+    """
+    return processing_service.process_pending(current_user["org_id"])
+
+
+@app.get("/processing/jobs")
+def processing_jobs(current_user: dict = Depends(get_current_user)):
+    """Recent processing-log entries (the audit trail)."""
+    return processing_service.list_processing_logs(current_user["org_id"])
+
+
 # Return the currently logged-in user together with their organization.
 @app.get("/me", response_model=MeResponse)
 def read_me(current_user: dict = Depends(get_current_user)):
@@ -248,7 +373,10 @@ def list_invoices(
 # Aggregated stats for the dashboard cards + charts (org-scoped).
 @app.get("/dashboard/summary")
 def dashboard_summary(current_user: dict = Depends(get_current_user)):
-    return get_dashboard_summary(current_user["org_id"])
+    summary = get_dashboard_summary(current_user["org_id"])
+    # Email-automation tiles: today's syncs, imported invoices, errors, queue.
+    summary["email_stats"] = get_email_stats(current_user["org_id"])
+    return summary
 
 
 # A single invoice's details (org-scoped).
