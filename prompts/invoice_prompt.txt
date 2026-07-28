@@ -13,6 +13,7 @@ Rules:
 - Do not wrap the JSON in markdown.
 - If any field is missing, return null.
 - Never guess or invent values.
+- invoice_date must be in ISO format: YYYY-MM-DD (e.g. 2026-07-19).
 
 Return the JSON in this format:
 

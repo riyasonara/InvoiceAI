@@ -3,9 +3,11 @@ from google.genai import types
 from google.genai.errors import ServerError
 from pydantic import BaseModel, field_validator, ValidationError
 from dotenv import load_dotenv
+from datetime import datetime
 from typing import Optional
 import os
 import json
+import re
 import time
 
 # Load environment variables
@@ -13,6 +15,65 @@ load_dotenv()
 
 # Create Gemini client
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+
+# Month-name formats we accept from the model ("19 Jul 2022", "Jul 19, 2022", ...).
+_TEXT_DATE_FORMATS = (
+    "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
+    "%b %d %Y", "%B %d %Y", "%d-%b-%Y", "%d-%B-%Y",
+)
+
+
+def normalize_date(value):
+    """Normalize a date string to ISO YYYY-MM-DD.
+
+    The model is told to return ISO, but real invoices produce things like
+    "19/7/2022" or "Jul 19, 2022". Ambiguous numeric dates (both parts <= 12)
+    are read day-first, matching the invoices we process. Unparseable values
+    are returned as-is rather than dropped.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+
+    # Already ISO (possibly with a time suffix) — reformat with zero-padding.
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if m:
+        y, mo, d = (int(g) for g in m.groups())
+        return _safe_iso(y, mo, d) or s
+
+    # Numeric with / - . separators: D/M/Y, M/D/Y, or Y/M/D.
+    m = re.match(r"^(\d{1,4})[./-](\d{1,2})[./-](\d{1,4})$", s)
+    if m:
+        a, b, c = (int(g) for g in m.groups())
+        if a > 31:  # year first
+            return _safe_iso(a, b, c) or s
+        year = c if c > 99 else 2000 + c
+        if a > 12:      # day-first, unambiguous
+            day, month = a, b
+        elif b > 12:    # month-first, unambiguous
+            day, month = b, a
+        else:           # ambiguous — day-first (our invoices' locale)
+            day, month = a, b
+        return _safe_iso(year, month, day) or s
+
+    # Month-name formats.
+    for fmt in _TEXT_DATE_FORMATS:
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+
+    return s  # unknown shape — keep the original rather than lose data
+
+
+def _safe_iso(year, month, day):
+    try:
+        return datetime(year, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
 
 
 class ExtractedInvoice(BaseModel):
@@ -28,13 +89,19 @@ class ExtractedInvoice(BaseModel):
     gst: Optional[float] = None
     total: Optional[float] = None
 
-    @field_validator("vendor", "invoice_number", "invoice_date", mode="before")
+    @field_validator("vendor", "invoice_number", mode="before")
     @classmethod
     def clean_text(cls, value):
         if value is None:
             return None
         value = str(value).strip()
         return value or None  # turn "" into None
+
+    @field_validator("invoice_date", mode="before")
+    @classmethod
+    def clean_date(cls, value):
+        # Normalize whatever date shape the model returned to ISO YYYY-MM-DD.
+        return normalize_date(value)
 
     @field_validator("gst", "total", mode="before")
     @classmethod
