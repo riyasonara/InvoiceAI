@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from db import SessionLocal
 from models import EmailAttachment, EmailMessage, InvoiceProcessingLog
 from readers.pdf_reader import read_pdf
-from services import ai_service, gmail_service
+from services import ai_service, billing_service, gmail_service
+from services.billing_service import QuotaExceeded
 from services.database_service import save_invoice, get_invoice_id
 from services.email_service import _get_account_credentials
 
@@ -85,6 +86,14 @@ def process_attachment(attachment_id):
         gmail_message_id = message.gmail_message_id if message else None
     finally:
         db.close()
+
+    # Plan quota — email-sourced invoices count too. Left pending (not failed)
+    # so the queue drains automatically once the org upgrades or the month rolls.
+    try:
+        billing_service.check_invoice_quota(org_id)
+    except QuotaExceeded as exc:
+        _log(org_id, attachment_id, "quota_exceeded", str(exc), status="error")
+        return {"status": "skipped", "error": "quota_exceeded"}
 
     _set_attachment(attachment_id, "processing")
     _log(org_id, attachment_id, "processing_started", f"Processing {filename}")

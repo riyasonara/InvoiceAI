@@ -12,6 +12,7 @@ import SuppliersPage from "./pages/SuppliersPage";
 import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
 import EmailsPage from "./pages/EmailsPage";
+import BillingPage from "./pages/BillingPage";
 
 export default function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="suppliers" element={<SuppliersPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="emails" element={<EmailsPage />} />
+        <Route path="billing" element={<BillingPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

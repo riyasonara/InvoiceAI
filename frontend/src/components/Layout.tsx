@@ -11,6 +11,7 @@ import PeopleAltRoundedIcon from "@mui/icons-material/PeopleAltRounded";
 import BarChartRoundedIcon from "@mui/icons-material/BarChartRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MailRoundedIcon from "@mui/icons-material/MailRounded";
+import CreditCardRoundedIcon from "@mui/icons-material/CreditCardRounded";
 import Brand from "./Brand";
 import type { CurrentUser } from "../types";
 import type { ReactNode } from "react";
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: "/suppliers", label: "Suppliers", icon: <PeopleAltRoundedIcon /> },
   { to: "/reports", label: "Reports", icon: <BarChartRoundedIcon /> },
   { to: "/emails", label: "Emails", icon: <MailRoundedIcon /> },
+  { to: "/billing", label: "Billing", icon: <CreditCardRoundedIcon /> },
   { to: "/settings", label: "Settings", icon: <SettingsRoundedIcon /> },
 ];
 

@@ -1,6 +1,8 @@
+import logging
 import os
 import secrets
 import tempfile
+from contextlib import asynccontextmanager
 from typing import Optional, Literal
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
@@ -11,6 +13,10 @@ from sqlalchemy.exc import IntegrityError
 
 from services import gmail_service
 from services import processing_service
+from services import scheduler_service
+from services import billing_service
+from services.billing_service import QuotaExceeded
+import plans
 from services.email_service import (
     create_email_tables,
     upsert_email_account,
@@ -42,6 +48,10 @@ from services.organization_service import (
     backfill_user_orgs,
     get_organization_by_id,
     get_organization_by_invite_code,
+    list_members,
+    update_member_role,
+    remove_member,
+    LastAdminError,
 )
 from services.auth_service import (
     hash_password,
@@ -51,8 +61,23 @@ from services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 
+# App-level structured logging (uvicorn configures only its own loggers).
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start the background auto-sync loop; stop it cleanly on shutdown.
+    sync_task = scheduler_service.start()
+    yield
+    scheduler_service.stop(sync_task)
+
+
 # Create the application — this "app" object IS our API.
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 # Allow our React dev server (a different origin) to call this API.
 # Without this, the browser blocks the requests with a CORS error.
@@ -107,6 +132,19 @@ def get_current_user(access_token: str | None = Cookie(default=None)):
     return user
 
 
+def require_admin(current_user: dict = Depends(get_current_user)):
+    """Dependency for workspace-management routes: builds on get_current_user
+    and rejects non-admins with 403. Enforced server-side — hiding a button in
+    the UI is not access control.
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="This action requires an admin role.",
+        )
+    return current_user
+
+
 # What the caller must send to register. Pydantic validates both fields:
 # a real email format, and a password of at least 8 characters.
 # Register either CREATES a new org (organization_name) or JOINS one
@@ -128,14 +166,40 @@ class UserResponse(BaseModel):
 class OrganizationResponse(BaseModel):
     id: int
     name: str
-    invite_code: str
+    # Only sent to admins — the invite code grants workspace access, so it is
+    # withheld from members at the API level, not just hidden in the UI.
+    invite_code: Optional[str] = None
 
 
-# The logged-in user together with their organization (name + shareable code).
+# The logged-in user, their role, and their organization.
 class MeResponse(BaseModel):
     id: int
     email: EmailStr
+    role: str
     organization: OrganizationResponse
+
+
+class MemberResponse(BaseModel):
+    id: int
+    email: EmailStr
+    role: str
+
+
+class MemberRoleUpdate(BaseModel):
+    role: Literal["admin", "member"]
+
+
+def _me_payload(user: dict) -> dict:
+    """Shared shape for /me and /login, redacting the invite code for members."""
+    org = dict(get_organization_by_id(user["org_id"]) or {})
+    if user.get("role") != "admin":
+        org.pop("invite_code", None)
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "role": user.get("role", "member"),
+        "organization": org,
+    }
 
 
 # Fields the dashboard can change on an invoice. Literal gives free validation:
@@ -168,15 +232,18 @@ def register(request: RegisterRequest):
             detail="An account with this email already exists.",
         )
 
-    # Decide which organization this user joins.
+    # Decide which organization this user joins, and with which role:
+    # whoever creates a workspace administers it; invitees start as members.
     if request.invite_code:
         # JOIN an existing org via its invite code.
         org = get_organization_by_invite_code(request.invite_code)
         if org is None:
             raise HTTPException(status_code=400, detail="Invalid invite code.")
+        role = "member"
     elif request.organization_name:
-        # CREATE a brand-new org; this user is its first member.
+        # CREATE a brand-new org; this user is its first member and admin.
         org = create_organization(request.organization_name)
+        role = "admin"
     else:
         raise HTTPException(
             status_code=400,
@@ -187,7 +254,7 @@ def register(request: RegisterRequest):
     hashed = hash_password(request.password)
 
     try:
-        return create_user(request.email, hashed, org["id"])
+        return create_user(request.email, hashed, org["id"], role=role)
     except IntegrityError:
         # The users.email UNIQUE constraint fired (a race past the pre-check).
         raise HTTPException(
@@ -224,8 +291,7 @@ def login(request: LoginRequest, response: Response):
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # cookie expires with the token
     )
 
-    org = get_organization_by_id(user["org_id"])
-    return {"id": user["id"], "email": user["email"], "organization": org}
+    return _me_payload(user)
 
 
 # Log out by clearing the auth cookie. Because the cookie is httpOnly, only the
@@ -239,7 +305,7 @@ def logout(response: Response):
 # ===== Gmail integration — Feature 1: OAuth (connect / callback / status / disconnect) =====
 
 @app.get("/gmail/connect")
-def gmail_connect(response: Response, current_user: dict = Depends(get_current_user)):
+def gmail_connect(response: Response, current_user: dict = Depends(require_admin)):
     """Return the Google consent URL. Frontend redirects the browser there."""
     if not gmail_service.is_configured():
         raise HTTPException(
@@ -260,7 +326,7 @@ def gmail_callback(
     code: str = "",
     state: str = "",
     gmail_oauth_state: Optional[str] = Cookie(default=None),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_admin),
 ):
     """Google redirects here after consent. Verify state, exchange the code,
     store the (encrypted) tokens, then bounce back to the frontend.
@@ -289,12 +355,14 @@ def gmail_status(current_user: dict = Depends(get_current_user)):
         "connected": True,
         "email": account["email_address"],
         "connected_at": account["connected_at"],
+        "last_synced_at": account["last_synced_at"],
+        "auto_sync_seconds": scheduler_service.SYNC_INTERVAL_SECONDS,
         "configured": True,
     }
 
 
 @app.post("/gmail/disconnect")
-def gmail_disconnect(current_user: dict = Depends(get_current_user)):
+def gmail_disconnect(current_user: dict = Depends(require_admin)):
     delete_email_account(current_user["org_id"])
     return {"message": "Gmail disconnected."}
 
@@ -304,6 +372,11 @@ def gmail_disconnect(current_user: dict = Depends(get_current_user)):
 @app.post("/emails/sync")
 def emails_sync(current_user: dict = Depends(get_current_user)):
     """Pull unread emails with invoice attachments into the workspace."""
+    if not billing_service.has_email_automation(current_user["org_id"]):
+        raise HTTPException(
+            status_code=402,
+            detail="Email import is a Pro feature. Upgrade to automate invoice intake.",
+        )
     result = sync_gmail(current_user["org_id"])
     if result is None:
         raise HTTPException(status_code=400, detail="No Gmail account connected.")
@@ -344,12 +417,64 @@ def processing_jobs(current_user: dict = Depends(get_current_user)):
 # Return the currently logged-in user together with their organization.
 @app.get("/me", response_model=MeResponse)
 def read_me(current_user: dict = Depends(get_current_user)):
-    org = get_organization_by_id(current_user["org_id"])
-    return {
-        "id": current_user["id"],
-        "email": current_user["email"],
-        "organization": org,
-    }
+    return _me_payload(current_user)
+
+
+# ===== Billing =====
+
+@app.get("/billing/usage")
+def billing_usage(current_user: dict = Depends(get_current_user)):
+    """Current plan, this month's usage, and remaining quota."""
+    return billing_service.get_usage(current_user["org_id"])
+
+
+@app.get("/billing/plans")
+def billing_plans():
+    """Public plan catalogue for the pricing UI."""
+    return list(plans.PLANS.values())
+
+
+# ===== Workspace members (roles & permissions) =====
+
+@app.get("/organization/members", response_model=list[MemberResponse])
+def organization_members(current_user: dict = Depends(get_current_user)):
+    """Everyone in the workspace. Visible to all members (you should know who
+    your teammates are); only admins can change anything.
+    """
+    return list_members(current_user["org_id"])
+
+
+@app.patch("/organization/members/{member_id}", response_model=MemberResponse)
+def organization_member_role(
+    member_id: int,
+    update: MemberRoleUpdate,
+    current_user: dict = Depends(require_admin),
+):
+    """Promote or demote a teammate."""
+    try:
+        member = update_member_role(current_user["org_id"], member_id, update.role)
+    except LastAdminError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if member is None:
+        raise HTTPException(status_code=404, detail="Member not found.")
+    return member
+
+
+@app.delete("/organization/members/{member_id}")
+def organization_member_remove(
+    member_id: int,
+    current_user: dict = Depends(require_admin),
+):
+    """Remove a teammate from the workspace."""
+    if member_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="You cannot remove yourself.")
+    try:
+        removed = remove_member(current_user["org_id"], member_id)
+    except LastAdminError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    if not removed:
+        raise HTTPException(status_code=404, detail="Member not found.")
+    return {"message": "Member removed."}
 
 
 # List this org's invoices, with optional search / status / date-range filters.
@@ -427,6 +552,13 @@ async def extract(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
+    # Guard 0: plan quota — checked before any work so users hit the limit
+    # before we spend an AI call (402 Payment Required).
+    try:
+        billing_service.check_invoice_quota(current_user["org_id"])
+    except QuotaExceeded as exc:
+        raise HTTPException(status_code=402, detail=str(exc))
+
     # Guard 1: must be a PDF. content_type is the MIME type the browser sent.
     # (This is a cheap early filter — the real check is that read_pdf() can
     # actually parse it, which happens downstream.)

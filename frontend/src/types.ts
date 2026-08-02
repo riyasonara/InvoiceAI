@@ -1,16 +1,48 @@
 // Shared domain types — mirror the FastAPI response shapes.
 
+export type Role = "admin" | "member";
+
 export interface Organization {
   id: number;
   name: string;
-  invite_code: string;
+  // Only present for admins — the API withholds it from members.
+  invite_code?: string | null;
 }
 
-// What /me and /login return (user + their organization).
+// What /me and /login return (user + role + their organization).
 export interface CurrentUser {
   id: number;
   email: string;
+  role: Role;
   organization: Organization;
+}
+
+export interface Member {
+  id: number;
+  email: string;
+  role: Role;
+}
+
+export interface Plan {
+  key: string;
+  name: string;
+  price_monthly: number;
+  invoice_limit: number | null;
+  email_automation: boolean;
+  features: string[];
+}
+
+export interface Usage {
+  plan: string;
+  plan_name: string;
+  price_monthly: number;
+  email_automation: boolean;
+  invoices_used: number;
+  invoice_limit: number | null;
+  invoices_remaining: number | null;
+  limit_reached: boolean;
+  subscription_status: string | null;
+  current_period_end: string | null;
 }
 
 export type InvoiceStatus = "paid" | "pending" | "unpaid";

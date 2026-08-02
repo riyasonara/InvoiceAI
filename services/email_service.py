@@ -5,6 +5,8 @@ tokens — only the address / status / connected timestamp.
 """
 from datetime import datetime, timezone
 
+from sqlalchemy import inspect, text
+
 from db import Base, engine, SessionLocal
 from models import EmailAccount, EmailMessage, EmailAttachment
 from services.crypto_service import encrypt, decrypt
@@ -12,10 +14,15 @@ from services import gmail_service
 
 
 def create_email_tables():
-    """Create the email_accounts table (and any other new ORM tables).
-    Idempotent and a no-op for tables that already exist.
+    """Create the email tables (idempotent), then apply additive migrations —
+    create_all never ALTERs tables that already exist.
     """
     Base.metadata.create_all(engine)
+
+    columns = [c["name"] for c in inspect(engine).get_columns("email_accounts")]
+    if "last_synced_at" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE email_accounts ADD COLUMN last_synced_at TEXT"))
 
 
 def upsert_email_account(org_id, email_address, access_token, refresh_token, token_expiry):
@@ -53,7 +60,28 @@ def get_email_account(org_id):
             "email_address": account.email_address,
             "status": account.status,
             "connected_at": account.connected_at,
+            "last_synced_at": account.last_synced_at,
         }
+    finally:
+        db.close()
+
+
+def list_connected_org_ids():
+    """Org ids with a connected Gmail account (the auto-sync work list)."""
+    db = SessionLocal()
+    try:
+        return [account.org_id for account in db.query(EmailAccount).all()]
+    finally:
+        db.close()
+
+
+def set_last_synced(org_id):
+    db = SessionLocal()
+    try:
+        account = db.query(EmailAccount).filter_by(org_id=org_id).first()
+        if account:
+            account.last_synced_at = datetime.now(timezone.utc).isoformat()
+            db.commit()
     finally:
         db.close()
 
@@ -156,6 +184,7 @@ def sync_gmail(org_id):
     finally:
         db.close()
 
+    set_last_synced(org_id)
     return {"scanned": len(messages), "new_messages": new_messages, "new_attachments": new_attachments}
 
 

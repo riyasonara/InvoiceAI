@@ -28,6 +28,15 @@ def create_users_table():
     if "org_id" not in existing_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN org_id INTEGER")
 
+    # Roles migration: default everyone to member, then promote each org's
+    # founder (its earliest user) to admin so no workspace is left unmanageable.
+    if "role" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'member'")
+        cursor.execute("""
+            UPDATE users SET role = 'admin'
+            WHERE id IN (SELECT MIN(id) FROM users WHERE org_id IS NOT NULL GROUP BY org_id)
+        """)
+
     connection.commit()
     connection.close()
 
@@ -38,10 +47,11 @@ def _to_dict(user: User) -> dict:
         "email": user.email,
         "hashed_password": user.hashed_password,
         "org_id": user.org_id,
+        "role": user.role,
     }
 
 
-def create_user(email, hashed_password, org_id):
+def create_user(email, hashed_password, org_id, role="member"):
     """Insert a new user into an organization.
 
     A duplicate email violates the UNIQUE constraint and raises SQLAlchemy's
@@ -49,11 +59,11 @@ def create_user(email, hashed_password, org_id):
     """
     db = SessionLocal()
     try:
-        user = User(email=email, hashed_password=hashed_password, org_id=org_id)
+        user = User(email=email, hashed_password=hashed_password, org_id=org_id, role=role)
         db.add(user)
         db.commit()
         db.refresh(user)
-        return {"id": user.id, "email": user.email, "org_id": user.org_id}
+        return {"id": user.id, "email": user.email, "org_id": user.org_id, "role": user.role}
     except IntegrityError:
         db.rollback()
         raise

@@ -22,6 +22,14 @@ class Organization(Base):
     invite_code: Mapped[str] = mapped_column(unique=True, nullable=False)
     created_at: Mapped[Optional[str]] = mapped_column(default=None)
 
+    # Billing lives on the tenant: in B2B the company subscribes, not a user.
+    # Stripe ids are stored so webhooks can map events back to an org.
+    plan: Mapped[str] = mapped_column(default="free")
+    subscription_status: Mapped[Optional[str]] = mapped_column(default=None)
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(default=None)
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(default=None)
+    current_period_end: Mapped[Optional[str]] = mapped_column(default=None)
+
     users: Mapped[list["User"]] = relationship(back_populates="organization")
     invoices: Mapped[list["Invoice"]] = relationship(back_populates="organization")
 
@@ -34,6 +42,9 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(nullable=False)
     created_at: Mapped[Optional[str]] = mapped_column(default=None)
     org_id: Mapped[Optional[int]] = mapped_column(ForeignKey("organizations.id"))
+    # "admin" manages the workspace (invite code, Gmail, members);
+    # "member" does the day-to-day invoice work.
+    role: Mapped[str] = mapped_column(default="member")
 
     organization: Mapped[Optional["Organization"]] = relationship(back_populates="users")
 
@@ -73,6 +84,7 @@ class EmailAccount(Base):
     token_expiry: Mapped[Optional[str]] = mapped_column(default=None)
     status: Mapped[str] = mapped_column(default="connected")
     connected_at: Mapped[Optional[str]] = mapped_column(default=None)
+    last_synced_at: Mapped[Optional[str]] = mapped_column(default=None)
 
 
 class EmailMessage(Base):
