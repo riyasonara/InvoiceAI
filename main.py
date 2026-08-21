@@ -5,7 +5,8 @@ import tempfile
 from contextlib import asynccontextmanager
 from typing import Optional, Literal
 
-from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Response, UploadFile
+import stripe
+from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -15,6 +16,7 @@ from services import gmail_service
 from services import processing_service
 from services import scheduler_service
 from services import billing_service
+from services import stripe_service
 from services.billing_service import QuotaExceeded
 import plans
 from services.email_service import (
@@ -423,6 +425,47 @@ def billing_usage(current_user: dict = Depends(get_current_user)):
 def billing_plans():
     """Public plan catalogue for the pricing UI."""
     return list(plans.PLANS.values())
+
+
+@app.post("/billing/checkout")
+def billing_checkout(current_user: dict = Depends(require_admin)):
+    """Start a subscription: returns a Stripe-hosted payment page URL.
+
+    Admin-only — this is a workspace-wide decision, same gate as Gmail and
+    member management. Nothing here grants Pro; only the (signature-
+    verified) webhook is allowed to do that once payment actually clears.
+    """
+    if not stripe_service.is_configured():
+        raise HTTPException(status_code=503, detail="Payments are not configured on the server.")
+
+    checkout_url = stripe_service.create_checkout_session(
+        current_user["org_id"],
+        current_user["email"],
+        success_url=f"{FRONTEND_URL}/billing?checkout=success",
+        cancel_url=f"{FRONTEND_URL}/billing?checkout=cancelled",
+    )
+    return {"checkout_url": checkout_url}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """Stripe calls this directly — no cookie, no logged-in user. The
+    signature check is the ONLY thing that may grant or revoke Pro; the
+    success-redirect a customer's browser lands on is purely cosmetic and
+    must never itself change billing state (anyone could just visit it).
+    """
+    payload = await request.body()
+    try:
+        event = stripe_service.construct_event(payload, request.headers.get("stripe-signature", ""))
+    except (ValueError, stripe.SignatureVerificationError):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature.")
+
+    if event["type"] == "checkout.session.completed":
+        stripe_service.handle_checkout_completed(event["data"]["object"])
+    elif event["type"] == "customer.subscription.deleted":
+        stripe_service.handle_subscription_deleted(event["data"]["object"])
+
+    return {"received": True}
 
 
 # ===== Workspace members (roles & permissions) =====

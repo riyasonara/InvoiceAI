@@ -39,3 +39,6 @@ google-auth-oauthlib==1.4.0
 google-api-python-client==2.198.0
 # Encrypt stored OAuth tokens at rest (Fernet)
 cryptography==49.0.0
+
+# Stripe billing: Checkout Sessions + webhook signature verification
+stripe==15.5.1

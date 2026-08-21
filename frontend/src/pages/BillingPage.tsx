@@ -16,6 +16,26 @@ export default function BillingPage() {
   const [usage, setUsage] = useState<Usage | null>(null);
   const [planList, setPlanList] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
+
+  async function upgrade() {
+    setCheckingOut(true);
+    setCheckoutError("");
+    try {
+      const res = await api("/billing/checkout", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setCheckoutError(data.detail || "Could not start checkout.");
+        setCheckingOut(false);
+        return;
+      }
+      window.location.href = data.checkout_url;
+    } catch {
+      setCheckoutError("Could not reach the server.");
+      setCheckingOut(false);
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -47,6 +67,12 @@ export default function BillingPage() {
       {usage?.limit_reached && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           You've reached your monthly invoice limit. Upgrade to Pro to keep processing invoices.
+        </Alert>
+      )}
+
+      {checkoutError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setCheckoutError("")}>
+          {checkoutError}
         </Alert>
       )}
 
@@ -114,8 +140,8 @@ export default function BillingPage() {
                 {isCurrent ? (
                   <Button fullWidth disabled variant="outlined">Your current plan</Button>
                 ) : plan.price_monthly > 0 ? (
-                  <Button fullWidth variant="contained" disabled={!isAdmin}>
-                    {isAdmin ? "Upgrade to Pro" : "Admins only"}
+                  <Button fullWidth variant="contained" disabled={!isAdmin || checkingOut} onClick={upgrade}>
+                    {!isAdmin ? "Admins only" : checkingOut ? "Redirecting…" : "Upgrade to Pro"}
                   </Button>
                 ) : (
                   <Button fullWidth variant="outlined" disabled>Downgrade</Button>
