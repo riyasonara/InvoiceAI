@@ -35,7 +35,12 @@ jobs:
       # key never gets used, only present so `import main` doesn't crash.
       GEMINI_API_KEY: ci-placeholder
       JWT_SECRET: ci-placeholder-jwt-secret
-      FERNET_KEY: ci-placeholder-fernet-key
+      # Must be a real Fernet-shaped key: crypto_service.py constructs a
+      # Fernet object at import time and validates the format immediately
+      # (unlike the other placeholders, which are only read lazily). This
+      # key is not a secret — generated fresh for CI, never used to encrypt
+      # anything real.
+      FERNET_KEY: RuJl5tNTUh2jEkbPElNjqjZeoE8iYRposwJFf2RvHPM=
       GOOGLE_CLIENT_ID: ci-placeholder
       GOOGLE_CLIENT_SECRET: ci-placeholder
 
