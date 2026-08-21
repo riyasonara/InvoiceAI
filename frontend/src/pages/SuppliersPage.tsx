@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Box, Card, Alert, TextField,
+  Box, Card, Alert, TextField, Stack, Typography, useMediaQuery,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
 import { api, formatMoney, formatDate } from "../api";
 import type { Invoice } from "../types";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
+import FieldRow from "../components/FieldRow";
 import { SkeletonLines } from "../components/Skeleton";
 
 interface Supplier {
@@ -18,6 +20,8 @@ interface Supplier {
 }
 
 export default function SuppliersPage() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -70,6 +74,17 @@ export default function SuppliersPage() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={<ApartmentRoundedIcon fontSize="inherit" />} title="No suppliers yet"
             message="Suppliers appear here once you upload invoices." />
+        ) : isMobile ? (
+          <Stack spacing={1.5}>
+            {filtered.map((s) => (
+              <Card key={s.name} variant="outlined" sx={{ p: 1.5 }}>
+                <Typography sx={{ fontWeight: 700, mb: 0.5 }}>{s.name}</Typography>
+                <FieldRow label="Invoices" value={s.count} />
+                <FieldRow label="Total Spend" value={formatMoney(s.total)} />
+                <FieldRow label="Latest Invoice" value={formatDate(s.last)} />
+              </Card>
+            ))}
+          </Stack>
         ) : (
           <Box sx={{ overflowX: "auto" }}>
             <Table size="small">

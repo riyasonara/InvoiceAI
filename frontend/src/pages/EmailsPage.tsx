@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   Box, Card, Typography, Button, Stack, Alert, Chip, TextField, IconButton, CircularProgress,
-  Table, TableHead, TableBody, TableRow, TableCell, Divider, Tooltip,
+  Table, TableHead, TableBody, TableRow, TableCell, Divider, Tooltip, useMediaQuery,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
@@ -16,6 +17,7 @@ import { api } from "../api";
 import type { EmailMessage, SyncResult, ProcessResult, EmailAttachment, ProcessingLog } from "../types";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
+import FieldRow from "../components/FieldRow";
 import { SkeletonLines } from "../components/Skeleton";
 
 // Icon + tone for each attachment status — a glance-able alternative to a
@@ -42,6 +44,8 @@ function statusVisual(a: EmailAttachment): { icon: ReactNode; tone: "success" | 
 const ACTIVE_POLL_MS = 3000;
 
 export default function EmailsPage() {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const [emails, setEmails] = useState<EmailMessage[]>([]);
   const [logs, setLogs] = useState<ProcessingLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -153,6 +157,31 @@ export default function EmailsPage() {
     (n, e) => n + e.attachments.filter((a) => a.status === "pending").length, 0
   );
 
+  // Status icon + retry button for one attachment — shared between the
+  // desktop table's Status column and the mobile card layout below.
+  function renderAttachmentStatus(a: EmailAttachment) {
+    const { icon, tone, label } = statusVisual(a);
+    const canRetry = a.status === "failed";
+    const isRetrying = retryingIds.has(a.id);
+    return (
+      <Stack direction="row" spacing={0.5} sx={{ alignItems: "center", height: 32 }}>
+        <Tooltip title={label}>
+          <Box sx={{ display: "flex", color: tone === "disabled" ? "text.disabled" : `${tone}.main` }}>
+            {icon}
+          </Box>
+        </Tooltip>
+        <Tooltip title={canRetry ? "Retry now" : "Only failed attachments can be retried"}>
+          <span>
+            <IconButton size="small" disabled={!canRetry || isRetrying}
+              onClick={() => retryAttachment(a.id)} aria-label="Retry">
+              {isRetrying ? <CircularProgress size={16} /> : <RestartAltRoundedIcon fontSize="small" />}
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Stack>
+    );
+  }
+
   const q = search.toLowerCase();
   const filtered = emails.filter(
     (e) => (e.sender || "").toLowerCase().includes(q) || (e.subject || "").toLowerCase().includes(q)
@@ -212,6 +241,29 @@ export default function EmailsPage() {
           <EmptyState icon={<MailOutlineRoundedIcon fontSize="inherit" />} title="No emails yet"
             message="Click “Sync now” to pull invoices from your inbox — or connect Gmail first."
             action={<Button component={Link} to="/settings" variant="outlined">Go to Settings</Button>} />
+        ) : isMobile ? (
+          <Stack spacing={1.5}>
+            {filtered.map((e) => (
+              <Card key={e.id} variant="outlined" sx={{ p: 1.5 }}>
+                <Typography sx={{ fontWeight: 700 }}>{e.subject ?? "—"}</Typography>
+                <FieldRow label="From" value={e.sender ?? "—"} />
+                <FieldRow label="Received" value={(e.received_at || "").slice(0, 10) || "—"} />
+                <Divider sx={{ my: 1 }} />
+                <Stack spacing={0.75}>
+                  {e.attachments.map((a) => (
+                    <Stack key={a.id} direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                      <Chip size="small" variant="outlined" color="default"
+                        label={a.filename ?? "file"} sx={{ maxWidth: 180 }}
+                        {...(a.invoice_id
+                          ? { component: Link, to: `/invoices/${a.invoice_id}`, clickable: true }
+                          : {})} />
+                      {renderAttachmentStatus(a)}
+                    </Stack>
+                  ))}
+                </Stack>
+              </Card>
+            ))}
+          </Stack>
         ) : (
           <Box sx={{ overflowX: "auto" }}>
             <Table size="small">
@@ -245,33 +297,9 @@ export default function EmailsPage() {
                     </TableCell>
                     <TableCell>
                       <Stack spacing={0.5}>
-                        {e.attachments.map((a) => {
-                          const { icon, tone, label } = statusVisual(a);
-                          const canRetry = a.status === "failed";
-                          const isRetrying = retryingIds.has(a.id);
-                          return (
-                            <Stack key={a.id} direction="row" spacing={0.5} sx={{ alignItems: "center", height: 32 }}>
-                              <Tooltip title={label}>
-                                <Box sx={{
-                                  display: "flex",
-                                  color: tone === "disabled" ? "text.disabled" : `${tone}.main`,
-                                }}>
-                                  {icon}
-                                </Box>
-                              </Tooltip>
-                              <Tooltip title={canRetry ? "Retry now" : "Only failed attachments can be retried"}>
-                                <span>
-                                  <IconButton size="small" disabled={!canRetry || isRetrying}
-                                    onClick={() => retryAttachment(a.id)} aria-label="Retry">
-                                    {isRetrying
-                                      ? <CircularProgress size={16} />
-                                      : <RestartAltRoundedIcon fontSize="small" />}
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            </Stack>
-                          );
-                        })}
+                        {e.attachments.map((a) => (
+                          <Box key={a.id}>{renderAttachmentStatus(a)}</Box>
+                        ))}
                       </Stack>
                     </TableCell>
                   </TableRow>

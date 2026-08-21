@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Box, Card, Button, TextField, Stack, Alert,
+  Box, Card, Button, TextField, Stack, Alert, Typography, useMediaQuery,
   ToggleButton, ToggleButtonGroup,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
 import SearchOffRoundedIcon from "@mui/icons-material/SearchOffRounded";
 import { api, formatMoney, formatDate } from "../api";
@@ -12,10 +13,13 @@ import type { Invoice } from "../types";
 import StatusBadge from "../components/StatusBadge";
 import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
+import FieldRow from "../components/FieldRow";
 import { SkeletonLines } from "../components/Skeleton";
 
 export default function InvoicesPage() {
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   // Upload state (unchanged logic from the original upload flow)
   const [file, setFile] = useState<File | null>(null);
@@ -134,6 +138,22 @@ export default function InvoicesPage() {
         ) : invoices.length === 0 ? (
           <EmptyState icon={<SearchOffRoundedIcon fontSize="inherit" />} title="No invoices found"
             message="Try clearing filters, or upload an invoice above." />
+        ) : isMobile ? (
+          <Stack spacing={1.5}>
+            {invoices.map((inv) => (
+              <Card key={inv.id} variant="outlined" sx={{ p: 1.5, cursor: "pointer" }}
+                onClick={() => navigate(`/invoices/${inv.id}`)}>
+                <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 0.5 }}>
+                  <Typography sx={{ fontWeight: 700 }}>{inv.invoice_number ?? "—"}</Typography>
+                  <StatusBadge status={inv.status} />
+                </Stack>
+                <FieldRow label="Supplier" value={inv.vendor ?? "—"} />
+                <FieldRow label="Amount" value={formatMoney(inv.total)} />
+                <FieldRow label="Due Date" value={formatDate(inv.due_date)} />
+                <FieldRow label="Uploaded" value={formatDate(inv.created_at)} />
+              </Card>
+            ))}
+          </Stack>
         ) : (
           <Box sx={{ overflowX: "auto" }}>
             <Table size="small">
