@@ -4,10 +4,10 @@ import {
   Box, Card, Grid, Typography, Button, TextField, Stack,
   ToggleButton, ToggleButtonGroup, Table, TableBody, TableCell, TableRow,
 } from "@mui/material";
-import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import { api, formatMoney, formatDate } from "../api";
 import type { Invoice, InvoiceStatus } from "../types";
 import StatusBadge from "../components/StatusBadge";
+import PageHeader from "../components/PageHeader";
 import { SkeletonLines } from "../components/Skeleton";
 
 const STATUSES: InvoiceStatus[] = ["paid", "pending", "unpaid"];
@@ -18,18 +18,24 @@ export default function InvoiceDetailPage() {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [dueDate, setDueDate] = useState("");
   const [saving, setSaving] = useState(false);
 
   function load() {
+    setLoading(true);
+    setNotFound(false);
+    setLoadError(false);
     api(`/invoices/${id}`)
       .then((r) => {
         if (r.status === 404) { setNotFound(true); return null; }
-        return r.ok ? r.json() : null;
+        if (!r.ok) { setLoadError(true); return null; }
+        return r.json();
       })
       .then((data: Invoice | null) => {
         if (data) { setInvoice(data); setDueDate(data.due_date || ""); }
       })
+      .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }
 
@@ -51,6 +57,17 @@ export default function InvoiceDetailPage() {
 
   if (loading) {
     return <Card variant="outlined" sx={{ p: 3 }}><SkeletonLines count={6} /></Card>;
+  }
+  if (loadError) {
+    return (
+      <Card variant="outlined" sx={{ p: 3 }}>
+        <Typography variant="h6">Couldn't load this invoice</Typography>
+        <Typography color="text.secondary" sx={{ mb: 2 }}>
+          Something went wrong reaching the server. Try again.
+        </Typography>
+        <Button variant="contained" onClick={load}>Retry</Button>
+      </Card>
+    );
   }
   if (notFound || !invoice) {
     return (
@@ -75,16 +92,8 @@ export default function InvoiceDetailPage() {
 
   return (
     <Box>
-      <Stack direction="row" sx={{ mb: 3, justifyContent: "space-between", alignItems: "flex-start" }} spacing={2}>
-        <Box>
-          <Button startIcon={<ArrowBackRoundedIcon />} onClick={() => navigate(-1)} size="small" sx={{ mb: 1 }}>
-            Back
-          </Button>
-          <Typography variant="h4" sx={{ fontWeight: 700 }}>{invoice.vendor || "Invoice"}</Typography>
-          <Typography color="text.secondary">Invoice {invoice.invoice_number}</Typography>
-        </Box>
-        <StatusBadge status={invoice.status} />
-      </Stack>
+      <PageHeader title={invoice.vendor || "Invoice"} subtitle={`Invoice ${invoice.invoice_number}`}
+        onBack={() => navigate(-1)} actions={<StatusBadge status={invoice.status} />} />
 
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 7 }}>

@@ -18,3 +18,13 @@ export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   return String(value).slice(0, 10);
 }
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "2026-01" -> "Jan 2026" (short: "Jan '26", for tighter chart axis labels).
+export function monthLabel(value: string, short = false): string {
+  if (!value || !value.includes("-")) return value || "";
+  const [y, mm] = value.split("-");
+  const month = MONTHS[Number(mm) - 1] || mm;
+  return short ? `${month} '${y.slice(2)}` : `${month} ${y}`;
+}

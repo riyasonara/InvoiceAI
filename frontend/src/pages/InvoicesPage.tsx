@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Box, Card, Typography, Button, TextField, Stack, Alert,
+  Box, Card, Button, TextField, Stack, Alert,
   ToggleButton, ToggleButtonGroup,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from "@mui/material";
 import UploadFileRoundedIcon from "@mui/icons-material/UploadFileRounded";
+import SearchOffRoundedIcon from "@mui/icons-material/SearchOffRounded";
 import { api, formatMoney, formatDate } from "../api";
 import type { Invoice } from "../types";
 import StatusBadge from "../components/StatusBadge";
 import EmptyState from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
 import { SkeletonLines } from "../components/Skeleton";
 
 export default function InvoicesPage() {
@@ -28,6 +30,7 @@ export default function InvoicesPage() {
   const [status, setStatus] = useState("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [listError, setListError] = useState(false);
 
   function loadInvoices() {
     const params = new URLSearchParams();
@@ -36,10 +39,14 @@ export default function InvoicesPage() {
     if (fromDate) params.set("from_date", fromDate);
     if (toDate) params.set("to_date", toDate);
     const qs = params.toString();
+    setListError(false);
     return api(`/invoices${qs ? `?${qs}` : ""}`)
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => {
+        if (!r.ok) { setListError(true); return []; }
+        return r.json();
+      })
       .then((data) => setInvoices((data as Invoice[]) || []))
-      .catch((err) => console.error("Failed to load invoices", err))
+      .catch(() => setListError(true))
       .finally(() => setLoading(false));
   }
 
@@ -75,10 +82,7 @@ export default function InvoicesPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontWeight: 700 }}>Invoices</Typography>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Upload, search, and manage your workspace invoices.
-      </Typography>
+      <PageHeader title="Invoices" subtitle="Upload, search, and manage your workspace invoices." />
 
       {/* Upload */}
       <Card variant="outlined" sx={{ p: 2, mb: 2 }}>
@@ -122,10 +126,13 @@ export default function InvoicesPage() {
 
       {/* Table */}
       <Card variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
+        {listError && (
+          <Alert severity="error" sx={{ mb: 2 }}>Couldn't load invoices. Try reloading the page.</Alert>
+        )}
         {loading ? (
           <SkeletonLines count={6} />
         ) : invoices.length === 0 ? (
-          <EmptyState icon="🔍" title="No invoices found"
+          <EmptyState icon={<SearchOffRoundedIcon fontSize="inherit" />} title="No invoices found"
             message="Try clearing filters, or upload an invoice above." />
         ) : (
           <Box sx={{ overflowX: "auto" }}>

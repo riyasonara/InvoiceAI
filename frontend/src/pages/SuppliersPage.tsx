@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Box, Card, Typography, TextField,
+  Box, Card, Alert, TextField,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from "@mui/material";
+import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
 import { api, formatMoney, formatDate } from "../api";
 import type { Invoice } from "../types";
 import EmptyState from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
 import { SkeletonLines } from "../components/Skeleton";
 
 interface Supplier {
@@ -18,12 +20,17 @@ interface Supplier {
 export default function SuppliersPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     api("/invoices")
-      .then((r) => (r.ok ? r.json() : []))
+      .then((r) => {
+        if (!r.ok) { setError(true); return []; }
+        return r.json();
+      })
       .then((d) => setInvoices((d as Invoice[]) || []))
+      .catch(() => setError(true))
       .finally(() => setLoading(false));
   }, []);
 
@@ -45,10 +52,13 @@ export default function SuppliersPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontWeight: 700 }}>Suppliers</Typography>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Every supplier across your workspace, ranked by total spend.
-      </Typography>
+      <PageHeader title="Suppliers" subtitle="Every supplier across your workspace, ranked by total spend." />
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Couldn't load suppliers. Try reloading the page.
+        </Alert>
+      )}
 
       <TextField size="small" type="search" placeholder="Search suppliers…"
         value={search} onChange={(e) => setSearch(e.target.value)}
@@ -58,7 +68,7 @@ export default function SuppliersPage() {
         {loading ? (
           <SkeletonLines count={6} />
         ) : filtered.length === 0 ? (
-          <EmptyState icon="🏢" title="No suppliers yet"
+          <EmptyState icon={<ApartmentRoundedIcon fontSize="inherit" />} title="No suppliers yet"
             message="Suppliers appear here once you upload invoices." />
         ) : (
           <Box sx={{ overflowX: "auto" }}>

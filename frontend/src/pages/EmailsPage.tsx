@@ -11,9 +11,11 @@ import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import ErrorRoundedIcon from "@mui/icons-material/ErrorRounded";
 import HourglassEmptyRoundedIcon from "@mui/icons-material/HourglassEmptyRounded";
 import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
+import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
 import { api } from "../api";
 import type { EmailMessage, SyncResult, ProcessResult, EmailAttachment, ProcessingLog } from "../types";
 import EmptyState from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
 import { SkeletonLines } from "../components/Skeleton";
 
 // Icon + tone for each attachment status — a glance-able alternative to a
@@ -158,28 +160,21 @@ export default function EmailsPage() {
 
   return (
     <Box>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}
-        sx={{ mb: 3, justifyContent: "space-between", alignItems: { sm: "flex-start" } }}>
-        <Box>
-          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-            <Typography variant="h4" sx={{ fontWeight: 700 }}>Emails</Typography>
-            {(hasActive || syncing || processing) && (
-              <Stack direction="row" spacing={0.75} sx={{
-                alignItems: "center", px: 1, py: 0.25, borderRadius: 99,
-                border: 1, borderColor: "info.main", color: "info.main",
-              }}>
-                <Box sx={{
-                  width: 6, height: 6, borderRadius: "50%", bgcolor: "info.main",
-                  animation: "pulse 1.4s ease-in-out infinite",
-                  "@keyframes pulse": { "0%, 100%": { opacity: 1 }, "50%": { opacity: 0.3 } },
-                }} />
-                <Typography variant="caption" sx={{ fontWeight: 600 }}>Live</Typography>
-              </Stack>
-            )}
+      <PageHeader title="Emails" subtitle="Invoices received through your connected inbox."
+        badge={(hasActive || syncing || processing) && (
+          <Stack direction="row" spacing={0.75} sx={{
+            alignItems: "center", px: 1, py: 0.25, borderRadius: 99,
+            border: 1, borderColor: "info.main", color: "info.main",
+          }}>
+            <Box sx={{
+              width: 6, height: 6, borderRadius: "50%", bgcolor: "info.main",
+              animation: "pulse 1.4s ease-in-out infinite",
+              "@keyframes pulse": { "0%, 100%": { opacity: 1 }, "50%": { opacity: 0.3 } },
+            }} />
+            <Typography variant="caption" sx={{ fontWeight: 600 }}>Live</Typography>
           </Stack>
-          <Typography color="text.secondary">Invoices received through your connected inbox.</Typography>
-        </Box>
-        <Stack direction="row" spacing={1}>
+        )}
+        actions={<>
           <Button variant="outlined" color="inherit" startIcon={<SyncRoundedIcon />} onClick={sync} disabled={syncing || processing}>
             {syncing ? "Syncing…" : "Sync now"}
           </Button>
@@ -187,8 +182,7 @@ export default function EmailsPage() {
             onClick={processPending} disabled={processing || syncing || pendingCount === 0}>
             {processing ? "Processing…" : `Process (${pendingCount})`}
           </Button>
-        </Stack>
-      </Stack>
+        </>} />
 
       {result && (
         <Alert severity="success" sx={{ mb: 2 }}>
@@ -215,7 +209,7 @@ export default function EmailsPage() {
         {loading ? (
           <SkeletonLines count={6} />
         ) : filtered.length === 0 ? (
-          <EmptyState icon="📧" title="No emails yet"
+          <EmptyState icon={<MailOutlineRoundedIcon fontSize="inherit" />} title="No emails yet"
             message="Click “Sync now” to pull invoices from your inbox — or connect Gmail first."
             action={<Button component={Link} to="/settings" variant="outlined">Go to Settings</Button>} />
         ) : (

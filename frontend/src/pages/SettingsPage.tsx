@@ -9,6 +9,7 @@ import DeleteOutlineRoundedIcon from "@mui/icons-material/DeleteOutlineRounded";
 import ContentCopyRoundedIcon from "@mui/icons-material/ContentCopyRounded";
 import { api } from "../api";
 import type { CurrentUser, Member, Role } from "../types";
+import PageHeader from "../components/PageHeader";
 import { SkeletonLines } from "../components/Skeleton";
 
 interface GmailStatus {
@@ -100,10 +101,7 @@ export default function SettingsPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontWeight: 700 }}>Settings</Typography>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Manage your workspace, email connection, and teammates.
-      </Typography>
+      <PageHeader title="Settings" subtitle="Manage your workspace, email connection, and teammates." />
 
       {params.get("gmail") === "connected" && (
         <Alert severity="success" sx={{ mb: 2 }}>Gmail connected successfully.</Alert>
@@ -144,7 +142,7 @@ export default function SettingsPage() {
           <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>Gmail</Typography>
 
           {loading ? (
-            <Typography color="text.secondary">Loading…</Typography>
+            <SkeletonLines count={2} />
           ) : status && !status.configured ? (
             <Alert severity="info">
               Gmail integration isn't configured on the server yet

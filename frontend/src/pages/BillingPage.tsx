@@ -7,6 +7,7 @@ import {
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import { api } from "../api";
 import type { CurrentUser, Plan, Usage } from "../types";
+import PageHeader from "../components/PageHeader";
 import { SkeletonLines } from "../components/Skeleton";
 
 export default function BillingPage() {
@@ -78,10 +79,7 @@ export default function BillingPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ fontWeight: 700 }}>Billing</Typography>
-      <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Your plan and this month's usage.
-      </Typography>
+      <PageHeader title="Billing" subtitle="Your plan and this month's usage." />
 
       {usage?.limit_reached && (
         <Alert severity="warning" sx={{ mb: 2 }}>

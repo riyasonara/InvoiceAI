@@ -9,19 +9,27 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
-import { api, formatMoney } from "../api";
+import { api, formatMoney, monthLabel } from "../api";
 import type { DashboardSummary, Invoice } from "../types";
 import StatCard from "../components/StatCard";
 import StatusBadge from "../components/StatusBadge";
 import EmptyState from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
 import Skeleton, { SkeletonLines } from "../components/Skeleton";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function monthLabel(m: string): string {
-  if (!m || !m.includes("-")) return m || "";
-  const [y, mm] = m.split("-");
-  return `${MONTHS[Number(mm) - 1] || mm} '${y.slice(2)}`;
-}
+import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
+import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
+import PaidRoundedIcon from "@mui/icons-material/PaidRounded";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import HourglassEmptyRoundedIcon from "@mui/icons-material/HourglassEmptyRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import InboxRoundedIcon from "@mui/icons-material/InboxRounded";
+import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
+import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
+import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import PieChartOutlineRoundedIcon from "@mui/icons-material/PieChartOutlineRounded";
+import EmojiEventsRoundedIcon from "@mui/icons-material/EmojiEventsRounded";
+import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -47,7 +55,10 @@ export default function DashboardPage() {
 
   const CHART = {
     accent: theme.palette.primary.main,
-    bar: "#6366f1",
+    // A second, still on-brand tone for the Spending bar chart (distinct
+    // from the Top Suppliers bar below, which uses the plain accent) —
+    // derived from the theme instead of an unrelated hardcoded hex.
+    bar: theme.palette.mode === "dark" ? theme.palette.primary.light : theme.palette.primary.dark,
     grid: theme.palette.divider,
     axis: theme.palette.text.secondary,
     status: {
@@ -75,24 +86,18 @@ export default function DashboardPage() {
     .slice(0, 3);
   const recentInvoices = invoices.slice(0, 6);
 
-  const monthlyData = (summary?.monthly_trend || []).map((m) => ({ ...m, label: monthLabel(m.month) }));
+  const monthlyData = (summary?.monthly_trend || []).map((m) => ({ ...m, label: monthLabel(m.month, true) }));
   const statusData = (summary?.status_distribution || []).map((s) => ({ name: s.status, value: s.count }));
   const supplierData = (summary?.top_suppliers || []).map((s) => ({ name: s.vendor, amount: s.amount }));
 
   return (
     <Box>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}
-        sx={{ mb: 3, justifyContent: "space-between", alignItems: { sm: "flex-start" } }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 700 }}>Dashboard</Typography>
-          <Typography color="text.secondary">An overview of your organization's invoices.</Typography>
-        </Box>
-        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+      <PageHeader title="Dashboard" subtitle="An overview of your organization's invoices."
+        actions={<>
           <Button component={Link} to="/invoices" variant="contained">Upload Invoice</Button>
           <Button component={Link} to="/suppliers" variant="outlined" color="inherit">View Suppliers</Button>
           <Button component={Link} to="/reports" variant="outlined" color="inherit">View Reports</Button>
-        </Stack>
-      </Stack>
+        </>} />
 
       {/* Stat cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -104,12 +109,12 @@ export default function DashboardPage() {
             ))
           : (
             <>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="brand" icon="📄" label="Total Invoices" value={summary?.total_invoices ?? 0} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="indigo" icon="🏢" label="Total Suppliers" value={summary?.total_suppliers ?? 0} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="brand" icon="💰" label="Total Amount" value={formatMoney(summary?.total_amount)} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="green" icon="✅" label="Paid Amount" value={formatMoney(summary?.paid_amount)} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="amber" icon="⏳" label="Pending Amount" value={formatMoney(summary?.pending_amount)} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="red" icon="⚠️" label="Unpaid Invoices" value={summary?.unpaid_count ?? 0} hint={`${formatMoney(summary?.unpaid_amount)} outstanding`} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="brand" icon={<DescriptionRoundedIcon fontSize="inherit" />} label="Total Invoices" value={summary?.total_invoices ?? 0} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="indigo" icon={<ApartmentRoundedIcon fontSize="inherit" />} label="Total Suppliers" value={summary?.total_suppliers ?? 0} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="brand" icon={<PaidRoundedIcon fontSize="inherit" />} label="Total Amount" value={formatMoney(summary?.total_amount)} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="green" icon={<CheckCircleRoundedIcon fontSize="inherit" />} label="Paid Amount" value={formatMoney(summary?.paid_amount)} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="amber" icon={<HourglassEmptyRoundedIcon fontSize="inherit" />} label="Pending Amount" value={formatMoney(summary?.pending_amount)} /></Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="red" icon={<WarningAmberRoundedIcon fontSize="inherit" />} label="Unpaid Invoices" value={summary?.unpaid_count ?? 0} hint={`${formatMoney(summary?.unpaid_amount)} outstanding`} /></Grid>
             </>
           )}
       </Grid>
@@ -117,10 +122,10 @@ export default function DashboardPage() {
       {/* Email automation tiles */}
       {!loading && summary?.email_stats && (
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="indigo" icon="📥" label="Emails Synced Today" value={summary.email_stats.synced_today} /></Grid>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="green" icon="📨" label="Imported from Email" value={summary.email_stats.imported} /></Grid>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="red" icon="❌" label="Processing Errors" value={summary.email_stats.errors} /></Grid>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="amber" icon="🕓" label="Pending Queue" value={summary.email_stats.pending} /></Grid>
+          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="indigo" icon={<InboxRoundedIcon fontSize="inherit" />} label="Emails Synced Today" value={summary.email_stats.synced_today} /></Grid>
+          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="green" icon={<MailOutlineRoundedIcon fontSize="inherit" />} label="Imported from Email" value={summary.email_stats.imported} /></Grid>
+          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="red" icon={<ErrorOutlineRoundedIcon fontSize="inherit" />} label="Processing Errors" value={summary.email_stats.errors} /></Grid>
+          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="amber" icon={<HourglassEmptyRoundedIcon fontSize="inherit" />} label="Pending Queue" value={summary.email_stats.pending} /></Grid>
         </Grid>
       )}
 
@@ -130,7 +135,7 @@ export default function DashboardPage() {
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Monthly Invoice Trend</Typography>
             {loading ? <Skeleton height={220} /> : monthlyData.length === 0 ? (
-              <EmptyState icon="📈" title="No data yet" message="Upload invoices to see trends." />
+              <EmptyState icon={<TrendingUpRoundedIcon fontSize="inherit" />} title="No data yet" message="Upload invoices to see trends." />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={monthlyData} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
@@ -149,7 +154,7 @@ export default function DashboardPage() {
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Monthly Spending</Typography>
             {loading ? <Skeleton height={220} /> : monthlyData.length === 0 ? (
-              <EmptyState icon="💸" title="No data yet" message="Upload invoices to see spending." />
+              <EmptyState icon={<PaymentsRoundedIcon fontSize="inherit" />} title="No data yet" message="Upload invoices to see spending." />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={monthlyData} margin={{ top: 8, right: 8, bottom: 0, left: -4 }}>
@@ -168,7 +173,7 @@ export default function DashboardPage() {
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Invoice Status Distribution</Typography>
             {loading ? <Skeleton height={220} /> : statusData.length === 0 ? (
-              <EmptyState icon="🥧" title="No data yet" message="Statuses appear once you have invoices." />
+              <EmptyState icon={<PieChartOutlineRoundedIcon fontSize="inherit" />} title="No data yet" message="Statuses appear once you have invoices." />
             ) : (
               <>
                 <ResponsiveContainer width="100%" height={200}>
@@ -198,7 +203,7 @@ export default function DashboardPage() {
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Top Suppliers</Typography>
             {loading ? <Skeleton height={220} /> : supplierData.length === 0 ? (
-              <EmptyState icon="🏆" title="No suppliers yet" message="Top suppliers appear here." />
+              <EmptyState icon={<EmojiEventsRoundedIcon fontSize="inherit" />} title="No suppliers yet" message="Top suppliers appear here." />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={supplierData} layout="vertical" margin={{ top: 4, right: 12, bottom: 0, left: 8 }}>
@@ -223,7 +228,7 @@ export default function DashboardPage() {
               <Button component={Link} to="/invoices" size="small">View all</Button>
             </Stack>
             {loading ? <SkeletonLines count={5} /> : recentInvoices.length === 0 ? (
-              <EmptyState icon="📄" title="No invoices yet" message="Upload your first invoice to get started."
+              <EmptyState icon={<DescriptionRoundedIcon fontSize="inherit" />} title="No invoices yet" message="Upload your first invoice to get started."
                 action={<Button component={Link} to="/invoices" variant="contained">Upload Invoice</Button>} />
             ) : (
               <Table size="small">
@@ -249,7 +254,7 @@ export default function DashboardPage() {
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Notifications</Typography>
             {loading ? <SkeletonLines count={4} /> : overdue.length === 0 && recentUploads.length === 0 ? (
-              <EmptyState icon="🔔" title="You're all caught up" message="No overdue invoices." />
+              <EmptyState icon={<TaskAltRoundedIcon fontSize="inherit" />} title="You're all caught up" message="No overdue invoices." />
             ) : (
               <List disablePadding>
                 {overdue.map((inv) => (

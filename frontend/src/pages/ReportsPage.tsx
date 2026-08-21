@@ -1,34 +1,39 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import {
-  Box, Card, Grid, Typography, Button, Stack,
+  Box, Card, Grid, Typography, Button, Alert,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from "@mui/material";
 import DownloadRoundedIcon from "@mui/icons-material/DownloadRounded";
-import { api, formatMoney } from "../api";
+import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
+import PaidRoundedIcon from "@mui/icons-material/PaidRounded";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import HourglassEmptyRoundedIcon from "@mui/icons-material/HourglassEmptyRounded";
+import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
+import EventBusyRoundedIcon from "@mui/icons-material/EventBusyRounded";
+import { api, formatMoney, monthLabel } from "../api";
 import type { DashboardSummary, Invoice } from "../types";
 import EmptyState from "../components/EmptyState";
+import PageHeader from "../components/PageHeader";
+import StatCard from "../components/StatCard";
 import { SkeletonLines } from "../components/Skeleton";
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function monthLabel(m: string): string {
-  if (!m || !m.includes("-")) return m || "";
-  const [y, mm] = m.split("-");
-  return `${MONTHS[Number(mm) - 1] || mm} ${y}`;
-}
 
 export default function ReportsPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     Promise.all([
       api("/dashboard/summary").then((r) => (r.ok ? r.json() : null)),
       api("/invoices").then((r) => (r.ok ? r.json() : [])),
     ]).then(([s, inv]) => {
+      if (s === null) setError(true);
       setSummary(s as DashboardSummary | null);
       setInvoices((inv as Invoice[]) || []);
-    }).finally(() => setLoading(false));
+    }).catch(() => setError(true))
+      .finally(() => setLoading(false));
   }, []);
 
   function exportCsv() {
@@ -53,33 +58,31 @@ export default function ReportsPage() {
   }
 
   const monthly = summary?.monthly_trend || [];
-  const tiles: [string, string | number][] = [
-    ["Total Invoices", summary?.total_invoices ?? 0],
-    ["Total Amount", formatMoney(summary?.total_amount)],
-    ["Paid", formatMoney(summary?.paid_amount)],
-    ["Pending", formatMoney(summary?.pending_amount)],
-    ["Unpaid", formatMoney(summary?.unpaid_amount)],
+  interface Tile { label: string; value: string | number; icon: ReactNode; tone: "brand" | "green" | "amber" | "red" }
+  const tiles: Tile[] = [
+    { label: "Total Invoices", value: summary?.total_invoices ?? 0, icon: <DescriptionRoundedIcon fontSize="inherit" />, tone: "brand" },
+    { label: "Total Amount", value: formatMoney(summary?.total_amount), icon: <PaidRoundedIcon fontSize="inherit" />, tone: "brand" },
+    { label: "Paid", value: formatMoney(summary?.paid_amount), icon: <CheckCircleRoundedIcon fontSize="inherit" />, tone: "green" },
+    { label: "Pending", value: formatMoney(summary?.pending_amount), icon: <HourglassEmptyRoundedIcon fontSize="inherit" />, tone: "amber" },
+    { label: "Unpaid", value: formatMoney(summary?.unpaid_amount), icon: <WarningAmberRoundedIcon fontSize="inherit" />, tone: "red" },
   ];
 
   return (
     <Box>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2}
-        sx={{ mb: 3, justifyContent: "space-between", alignItems: { sm: "flex-start" } }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 700 }}>Reports</Typography>
-          <Typography color="text.secondary">Spending breakdowns and data export.</Typography>
-        </Box>
-        <Button variant="contained" startIcon={<DownloadRoundedIcon />}
-          onClick={exportCsv} disabled={invoices.length === 0}>Export CSV</Button>
-      </Stack>
+      <PageHeader title="Reports" subtitle="Spending breakdowns and data export."
+        actions={
+          <Button variant="contained" startIcon={<DownloadRoundedIcon />}
+            onClick={exportCsv} disabled={invoices.length === 0}>Export CSV</Button>
+        } />
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>Couldn't load report data. Try reloading the page.</Alert>
+      )}
 
       <Grid container spacing={2} sx={{ mb: 2 }}>
-        {tiles.map(([label, value]) => (
-          <Grid key={label} size={{ xs: 6, sm: 4, md: 2.4 }}>
-            <Card variant="outlined" sx={{ p: 2 }}>
-              <Typography variant="body2" color="text.secondary">{label}</Typography>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>{value}</Typography>
-            </Card>
+        {tiles.map((t) => (
+          <Grid key={t.label} size={{ xs: 6, sm: 4, md: 2.4 }}>
+            <StatCard tone={t.tone} icon={t.icon} label={t.label} value={t.value} />
           </Grid>
         ))}
       </Grid>
@@ -89,7 +92,8 @@ export default function ReportsPage() {
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Monthly Breakdown</Typography>
             {monthly.length === 0 ? (
-              <EmptyState icon="📅" title="No data yet" message="Upload invoices to build reports." />
+              <EmptyState icon={<EventBusyRoundedIcon fontSize="inherit" />} title="No data yet"
+                message="Upload invoices to build reports." />
             ) : (
               <Table size="small">
                 <TableHead>
