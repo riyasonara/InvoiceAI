@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: invoiceai_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # A fresh, throwaway container that dies with this job — nothing real
+      # to protect, so plain hardcoded credentials here (not GitHub Secrets)
+      # are correct, not a shortcut.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/invoiceai_test
+      # Dummy values so the app's modules import cleanly. None of these are
+      # ever called for real: the suite has no test that talks to Gemini or
+      # Gmail (see tests/test_ai_normalization.py and tests/api/), so a fake
+      # key never gets used, only present so `import main` doesn't crash.
+      GEMINI_API_KEY: ci-placeholder
+      JWT_SECRET: ci-placeholder-jwt-secret
+      FERNET_KEY: ci-placeholder-fernet-key
+      GOOGLE_CLIENT_ID: ci-placeholder
+      GOOGLE_CLIENT_SECRET: ci-placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - run: pytest tests/ -v
