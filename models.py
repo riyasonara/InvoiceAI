@@ -135,6 +135,12 @@ class EmailAttachment(Base):
     status: Mapped[str] = mapped_column(default="pending")  # pending|processing|completed|failed
     invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("invoices.id"), default=None)
     created_at: Mapped[Optional[str]] = mapped_column(default=None)
+    # Auto-retry for transient failures (e.g. Gemini temporarily down): how
+    # many retries have been scheduled so far, and when the next one is due.
+    # NULL next_retry_at means no retry is scheduled (terminal failure, or
+    # retries exhausted) — see services/processing_service.py.
+    retry_count: Mapped[int] = mapped_column(default=0)
+    next_retry_at: Mapped[Optional[str]] = mapped_column(default=None)
 
     message: Mapped[Optional["EmailMessage"]] = relationship(back_populates="attachments")
 

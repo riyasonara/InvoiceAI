@@ -188,6 +188,8 @@ def _message_to_dict(m):
                 "mime_type": a.mime_type,
                 "status": a.status,
                 "invoice_id": a.invoice_id,
+                "retry_count": a.retry_count,
+                "next_retry_at": a.next_retry_at,
             }
             for a in m.attachments
         ],

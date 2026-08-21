@@ -105,6 +105,8 @@ export interface EmailAttachment {
   mime_type: string | null;
   status: AttachmentStatus;
   invoice_id: number | null;
+  retry_count: number;
+  next_retry_at: string | null;
 }
 
 export interface EmailMessage {

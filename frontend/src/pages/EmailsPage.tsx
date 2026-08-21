@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Box, Card, Typography, Button, Stack, Alert, Chip, TextField,
-  Table, TableHead, TableBody, TableRow, TableCell, Divider,
+  Table, TableHead, TableBody, TableRow, TableCell, Divider, Tooltip,
 } from "@mui/material";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
@@ -203,14 +203,25 @@ export default function EmailsPage() {
                     <TableCell>{(e.received_at || "").slice(0, 10) || "—"}</TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
-                        {e.attachments.map((a) => (
-                          <Chip key={a.id} size="small" variant="outlined"
-                            color={CHIP_COLOR[a.status] || "default"}
-                            label={a.filename ?? "file"} sx={{ maxWidth: 200 }}
-                            {...(a.invoice_id
-                              ? { component: Link, to: `/invoices/${a.invoice_id}`, clickable: true }
-                              : {})} />
-                        ))}
+                        {e.attachments.map((a) => {
+                          const willRetry = a.status === "failed" && !!a.next_retry_at;
+                          const chip = (
+                            <Chip key={a.id} size="small" variant="outlined"
+                              color={willRetry ? "warning" : (CHIP_COLOR[a.status] || "default")}
+                              label={a.filename ?? "file"} sx={{ maxWidth: 200 }}
+                              {...(a.invoice_id
+                                ? { component: Link, to: `/invoices/${a.invoice_id}`, clickable: true }
+                                : {})} />
+                          );
+                          if (!willRetry) return chip;
+                          const at = (a.next_retry_at || "").slice(11, 16);
+                          return (
+                            <Tooltip key={a.id}
+                              title={`Failed — retrying automatically around ${at} (attempt ${a.retry_count}/3)`}>
+                              {chip}
+                            </Tooltip>
+                          );
+                        })}
                       </Stack>
                     </TableCell>
                   </TableRow>

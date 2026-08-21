@@ -7,7 +7,9 @@ invoice_processing_logs for a full audit trail.
 """
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import and_, or_
 
 from db import SessionLocal
 from models import EmailAttachment, EmailMessage, InvoiceProcessingLog
@@ -19,9 +21,22 @@ from services.email_service import _get_account_credentials
 
 PROMPT_PATH = "prompts/invoice_prompt.txt"
 
+# Auto-retry only failures that plausibly resolve on their own (a down AI
+# provider, a flaky download, an occasionally-truncated response) — never
+# "no_account" (needs the user to reconnect Gmail) or "no_invoice_data"
+# (the document will never become an invoice no matter how many times it's
+# read). Backoff matches what was asked for: 5 min, then 15, then 30.
+RETRYABLE_ERRORS = {"download", "extraction", "ai_unavailable", "invalid_ai_response"}
+RETRY_DELAY_MINUTES = [5, 15, 30]
+MAX_RETRIES = len(RETRY_DELAY_MINUTES)
+
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _now_stamp():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _log(org_id, attachment_id, step, message, status="info"):
@@ -47,6 +62,35 @@ def _set_attachment(attachment_id, status, invoice_id=None):
             db.commit()
     finally:
         db.close()
+
+
+def _fail_attachment(org_id, attachment_id, error_code, message):
+    """Mark an attachment failed, and — for a retryable error code, while
+    retries remain — schedule the next attempt instead of leaving it
+    permanently stuck. Reads/writes retry_count in the same transaction so
+    concurrent failures on the same attachment can't race past MAX_RETRIES.
+    """
+    db = SessionLocal()
+    try:
+        att = db.query(EmailAttachment).filter_by(id=attachment_id).first()
+        if att is None:
+            return
+        att.status = "failed"
+
+        if error_code in RETRYABLE_ERRORS and att.retry_count < MAX_RETRIES:
+            delay = RETRY_DELAY_MINUTES[att.retry_count]
+            att.retry_count += 1
+            att.next_retry_at = (datetime.now(timezone.utc) + timedelta(minutes=delay)).strftime("%Y-%m-%d %H:%M:%S")
+            note = f" · Retrying in {delay} min (attempt {att.retry_count}/{MAX_RETRIES})."
+        else:
+            att.next_retry_at = None
+            note = " · Giving up — no more automatic retries." if att.retry_count > 0 else ""
+
+        db.commit()
+    finally:
+        db.close()
+
+    _log(org_id, attachment_id, "failed", message + note, status="error")
 
 
 def _extract(file_bytes, mime_type, filename):
@@ -100,8 +144,7 @@ def process_attachment(attachment_id):
 
     account = _get_account_credentials(org_id)
     if account is None:
-        _set_attachment(attachment_id, "failed")
-        _log(org_id, attachment_id, "failed", "No connected Gmail account.", status="error")
+        _fail_attachment(org_id, attachment_id, "no_account", "No connected Gmail account.")
         return {"status": "failed", "error": "no_account"}
 
     # 1. Download
@@ -110,27 +153,24 @@ def process_attachment(attachment_id):
         file_bytes = gmail_service.download_attachment(creds, gmail_message_id, gmail_attachment_id)
         _log(org_id, attachment_id, "downloaded", f"Downloaded {len(file_bytes)} bytes")
     except Exception as exc:
-        _set_attachment(attachment_id, "failed")
-        _log(org_id, attachment_id, "failed", f"Download failed: {exc}", status="error")
+        _fail_attachment(org_id, attachment_id, "download", f"Download failed: {exc}")
         return {"status": "failed", "error": "download"}
 
     # 2. Extract
     try:
         result = _extract(file_bytes, mime_type, filename)
     except Exception as exc:
-        _set_attachment(attachment_id, "failed")
-        _log(org_id, attachment_id, "failed", f"Extraction error: {exc}", status="error")
+        _fail_attachment(org_id, attachment_id, "extraction", f"Extraction error: {exc}")
         return {"status": "failed", "error": "extraction"}
 
     if result.get("success") is False:
-        _set_attachment(attachment_id, "failed")
-        _log(org_id, attachment_id, "failed", result.get("error", "AI extraction failed"), status="error")
-        return {"status": "failed", "error": result.get("code")}
+        code = result.get("code")
+        _fail_attachment(org_id, attachment_id, code, result.get("error", "AI extraction failed"))
+        return {"status": "failed", "error": code}
 
     # 3. Validate — must actually look like an invoice (not a logo/signature image).
     if not (result.get("invoice_number") or result.get("total")):
-        _set_attachment(attachment_id, "failed")
-        _log(org_id, attachment_id, "failed", "No invoice data found — not an invoice.", status="error")
+        _fail_attachment(org_id, attachment_id, "no_invoice_data", "No invoice data found — not an invoice.")
         return {"status": "failed", "error": "no_invoice_data"}
 
     _log(org_id, attachment_id, "extracted",
@@ -145,14 +185,29 @@ def process_attachment(attachment_id):
 
 
 def process_pending(org_id):
-    """Process every pending attachment for an org. A queue would enqueue one
-    job per attachment instead of this loop — process_attachment stays the same.
+    """Process every pending attachment for an org, PLUS any failed one whose
+    scheduled retry has come due. Runs from both the manual "Process" button
+    and the background scheduler's own 5-minute cycle — that existing cadence
+    doubles as the retry check, no separate scheduler needed.
+
+    A queue would enqueue one job per attachment instead of this loop;
+    process_attachment stays the same either way.
     """
     db = SessionLocal()
     try:
         ids = [
             a.id for a in db.query(EmailAttachment)
-            .filter_by(org_id=org_id, status="pending").all()
+            .filter(
+                EmailAttachment.org_id == org_id,
+                or_(
+                    EmailAttachment.status == "pending",
+                    and_(
+                        EmailAttachment.status == "failed",
+                        EmailAttachment.next_retry_at.isnot(None),
+                        EmailAttachment.next_retry_at <= _now_stamp(),
+                    ),
+                ),
+            ).all()
         ]
     finally:
         db.close()
