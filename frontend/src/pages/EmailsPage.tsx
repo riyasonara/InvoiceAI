@@ -1,22 +1,38 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  Box, Card, Typography, Button, Stack, Alert, Chip, TextField,
+  Box, Card, Typography, Button, Stack, Alert, Chip, TextField, IconButton, CircularProgress,
   Table, TableHead, TableBody, TableRow, TableCell, Divider, Tooltip,
 } from "@mui/material";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import ErrorRoundedIcon from "@mui/icons-material/ErrorRounded";
+import HourglassEmptyRoundedIcon from "@mui/icons-material/HourglassEmptyRounded";
+import RestartAltRoundedIcon from "@mui/icons-material/RestartAltRounded";
 import { api } from "../api";
-import type { EmailMessage, SyncResult, ProcessResult, AttachmentStatus, ProcessingLog } from "../types";
+import type { EmailMessage, SyncResult, ProcessResult, EmailAttachment, ProcessingLog } from "../types";
 import EmptyState from "../components/EmptyState";
 import { SkeletonLines } from "../components/Skeleton";
 
-const CHIP_COLOR: Record<AttachmentStatus, "default" | "info" | "success" | "error"> = {
-  pending: "default",
-  processing: "info",
-  completed: "success",
-  failed: "error",
-};
+// Icon + tone for each attachment status — a glance-able alternative to a
+// text chip. "willRetry" (a failed attachment with a scheduled auto-retry)
+// gets its own warning tone, distinct from a terminal failure.
+function statusVisual(a: EmailAttachment): { icon: ReactNode; tone: "success" | "warning" | "error" | "disabled"; label: string } {
+  if (a.status === "completed") return { icon: <CheckCircleRoundedIcon fontSize="small" />, tone: "success", label: "Extracted successfully" };
+  if (a.status === "processing") return { icon: <SyncRoundedIcon fontSize="small" />, tone: "warning", label: "Processing…" };
+  if (a.status === "pending") return { icon: <HourglassEmptyRoundedIcon fontSize="small" />, tone: "disabled", label: "Waiting to be processed" };
+  const willRetry = !!a.next_retry_at;
+  const at = (a.next_retry_at || "").slice(11, 16);
+  return {
+    icon: <ErrorRoundedIcon fontSize="small" />,
+    tone: willRetry ? "warning" : "error",
+    label: willRetry
+      ? `Failed — retrying automatically around ${at} (attempt ${a.retry_count}/3)`
+      : "Failed — no more automatic retries",
+  };
+}
 
 // How often to poll while something's actually happening (a sync/process
 // action in flight, or an attachment still pending/processing) — backs off
@@ -33,6 +49,7 @@ export default function EmailsPage() {
   const [processResult, setProcessResult] = useState<ProcessResult | null>(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [retryingIds, setRetryingIds] = useState<Set<number>>(new Set());
 
   function load(silent = false) {
     if (!silent) setLoading(true);
@@ -108,6 +125,25 @@ export default function EmailsPage() {
       setError("Could not reach the server. Is the API running on port 8000?");
     } finally {
       setProcessing(false);
+    }
+  }
+
+  async function retryAttachment(attachmentId: number) {
+    setRetryingIds((prev) => new Set(prev).add(attachmentId));
+    setError("");
+    try {
+      const res = await api(`/processing/attachments/${attachmentId}/retry`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail || "Retry failed.");
+        return;
+      }
+      load();
+      loadLogs();
+    } catch {
+      setError("Could not reach the server. Is the API running on port 8000?");
+    } finally {
+      setRetryingIds((prev) => { const next = new Set(prev); next.delete(attachmentId); return next; });
     }
   }
 
@@ -189,6 +225,7 @@ export default function EmailsPage() {
                 <TableRow>
                   <TableCell>From</TableCell><TableCell>Subject</TableCell>
                   <TableCell>Received</TableCell><TableCell>Attachments</TableCell>
+                  <TableCell>Status</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -202,24 +239,43 @@ export default function EmailsPage() {
                     </TableCell>
                     <TableCell>{(e.received_at || "").slice(0, 10) || "—"}</TableCell>
                     <TableCell>
-                      <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
+                      <Stack spacing={0.5}>
+                        {e.attachments.map((a) => (
+                          <Chip key={a.id} size="small" variant="outlined" color="default"
+                            label={a.filename ?? "file"} sx={{ maxWidth: 200, alignSelf: "flex-start" }}
+                            {...(a.invoice_id
+                              ? { component: Link, to: `/invoices/${a.invoice_id}`, clickable: true }
+                              : {})} />
+                        ))}
+                      </Stack>
+                    </TableCell>
+                    <TableCell>
+                      <Stack spacing={0.5}>
                         {e.attachments.map((a) => {
-                          const willRetry = a.status === "failed" && !!a.next_retry_at;
-                          const chip = (
-                            <Chip key={a.id} size="small" variant="outlined"
-                              color={willRetry ? "warning" : (CHIP_COLOR[a.status] || "default")}
-                              label={a.filename ?? "file"} sx={{ maxWidth: 200 }}
-                              {...(a.invoice_id
-                                ? { component: Link, to: `/invoices/${a.invoice_id}`, clickable: true }
-                                : {})} />
-                          );
-                          if (!willRetry) return chip;
-                          const at = (a.next_retry_at || "").slice(11, 16);
+                          const { icon, tone, label } = statusVisual(a);
+                          const canRetry = a.status === "failed";
+                          const isRetrying = retryingIds.has(a.id);
                           return (
-                            <Tooltip key={a.id}
-                              title={`Failed — retrying automatically around ${at} (attempt ${a.retry_count}/3)`}>
-                              {chip}
-                            </Tooltip>
+                            <Stack key={a.id} direction="row" spacing={0.5} sx={{ alignItems: "center", height: 32 }}>
+                              <Tooltip title={label}>
+                                <Box sx={{
+                                  display: "flex",
+                                  color: tone === "disabled" ? "text.disabled" : `${tone}.main`,
+                                }}>
+                                  {icon}
+                                </Box>
+                              </Tooltip>
+                              <Tooltip title={canRetry ? "Retry now" : "Only failed attachments can be retried"}>
+                                <span>
+                                  <IconButton size="small" disabled={!canRetry || isRetrying}
+                                    onClick={() => retryAttachment(a.id)} aria-label="Retry">
+                                    {isRetrying
+                                      ? <CircularProgress size={16} />
+                                      : <RestartAltRoundedIcon fontSize="small" />}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </Stack>
                           );
                         })}
                       </Stack>

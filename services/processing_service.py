@@ -223,6 +223,18 @@ def process_pending(org_id):
     return {"processed": len(ids), "completed": completed, "failed": failed}
 
 
+def get_attachment_status(org_id, attachment_id):
+    """Just the status, org-scoped — used to guard manual retry (only a
+    failed attachment may be retried; None if it's not in this org at all).
+    """
+    db = SessionLocal()
+    try:
+        att = db.query(EmailAttachment).filter_by(org_id=org_id, id=attachment_id).first()
+        return att.status if att else None
+    finally:
+        db.close()
+
+
 def list_processing_logs(org_id, limit=100):
     """Recent processing-log entries for the org, newest first."""
     db = SessionLocal()

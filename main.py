@@ -401,6 +401,19 @@ def processing_run(current_user: dict = Depends(get_current_user)):
     return processing_service.process_pending(current_user["org_id"])
 
 
+@app.post("/processing/attachments/{attachment_id}/retry")
+def processing_retry(attachment_id: int, current_user: dict = Depends(get_current_user)):
+    """Manually retry one failed attachment right now, instead of waiting
+    for its scheduled auto-retry (or for one that already gave up).
+    """
+    status = processing_service.get_attachment_status(current_user["org_id"], attachment_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+    if status != "failed":
+        raise HTTPException(status_code=400, detail="Only a failed attachment can be retried.")
+    return processing_service.process_attachment(attachment_id)
+
+
 @app.get("/processing/jobs")
 def processing_jobs(current_user: dict = Depends(get_current_user)):
     """Recent processing-log entries (the audit trail)."""
