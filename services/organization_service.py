@@ -1,5 +1,4 @@
 import secrets
-import sqlite3
 
 from db import SessionLocal
 from models import Organization, User
@@ -7,36 +6,6 @@ from models import Organization, User
 
 class LastAdminError(Exception):
     """Raised when an action would leave an organization with no admin."""
-
-
-def create_organizations_table():
-    # DDL stays raw for now; the Organization ORM model maps onto this table.
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS organizations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            invite_code TEXT UNIQUE NOT NULL,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-
-    # Billing columns (additive) — existing workspaces start on the free plan.
-    existing = [row[1] for row in cursor.execute("PRAGMA table_info(organizations)")]
-    for column, ddl in (
-        ("plan", "ALTER TABLE organizations ADD COLUMN plan TEXT DEFAULT 'free'"),
-        ("subscription_status", "ALTER TABLE organizations ADD COLUMN subscription_status TEXT"),
-        ("stripe_customer_id", "ALTER TABLE organizations ADD COLUMN stripe_customer_id TEXT"),
-        ("stripe_subscription_id", "ALTER TABLE organizations ADD COLUMN stripe_subscription_id TEXT"),
-        ("current_period_end", "ALTER TABLE organizations ADD COLUMN current_period_end TEXT"),
-    ):
-        if column not in existing:
-            cursor.execute(ddl)
-
-    connection.commit()
-    connection.close()
 
 
 def _to_dict(org: Organization) -> dict:
@@ -130,29 +99,3 @@ def remove_member(org_id, member_id):
         db.close()
 
 
-def backfill_user_orgs():
-    """Migration: every user created before organizations existed gets their
-    own personal org, so no one is left without a tenant. Runs once — after
-    the first pass, no users have a NULL org_id. (Raw SQL migration.)
-    """
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    orphan_users = cursor.execute(
-        "SELECT id, email FROM users WHERE org_id IS NULL"
-    ).fetchall()
-
-    for user_id, email in orphan_users:
-        invite_code = secrets.token_urlsafe(8)
-        cursor.execute(
-            "INSERT INTO organizations (name, invite_code) VALUES (?, ?)",
-            (f"{email}'s Organization", invite_code),
-        )
-        new_org_id = cursor.lastrowid
-        cursor.execute(
-            "UPDATE users SET org_id = ? WHERE id = ?",
-            (new_org_id, user_id),
-        )
-
-    connection.commit()
-    connection.close()

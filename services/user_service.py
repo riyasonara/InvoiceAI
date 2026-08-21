@@ -1,44 +1,7 @@
-import sqlite3
-
 from sqlalchemy.exc import IntegrityError
 
 from db import SessionLocal
 from models import User
-
-
-def create_users_table():
-    # Schema creation + migration still owns the DDL (raw SQL) for now.
-    # The ORM models in models.py map onto exactly this table.
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            hashed_password TEXT NOT NULL,
-            org_id INTEGER,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-
-    # Migration for databases created before organizations existed: add the
-    # org_id column if it's missing (backfill_user_orgs then fills it in).
-    existing_columns = [row[1] for row in cursor.execute("PRAGMA table_info(users)")]
-    if "org_id" not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN org_id INTEGER")
-
-    # Roles migration: default everyone to member, then promote each org's
-    # founder (its earliest user) to admin so no workspace is left unmanageable.
-    if "role" not in existing_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'member'")
-        cursor.execute("""
-            UPDATE users SET role = 'admin'
-            WHERE id IN (SELECT MIN(id) FROM users WHERE org_id IS NOT NULL GROUP BY org_id)
-        """)
-
-    connection.commit()
-    connection.close()
 
 
 def _to_dict(user: User) -> dict:

@@ -1,79 +1,7 @@
-import sqlite3
-
 from sqlalchemy import func, or_, distinct
 
 from db import SessionLocal
 from models import Invoice
-
-
-def create_database():
-    connection = sqlite3.connect("invoice.db")
-    cursor = connection.cursor()
-
-    # Fresh installs get both user_id (who uploaded it) and org_id (the tenant
-    # that owns it) from the start.
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS invoices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            org_id INTEGER,
-            vendor TEXT,
-            invoice_number TEXT,
-            invoice_date TEXT,
-            gst REAL,
-            total REAL,
-            status TEXT DEFAULT 'pending',
-            due_date TEXT,
-            created_at TEXT
-        )
-    """)
-
-    # Migration: add org_id if the table predates organizations.
-    existing_columns = [row[1] for row in cursor.execute("PRAGMA table_info(invoices)")]
-    if "org_id" not in existing_columns:
-        cursor.execute("ALTER TABLE invoices ADD COLUMN org_id INTEGER")
-
-    # Backfill each invoice's org_id from the org of the user who uploaded it.
-    cursor.execute("""
-        UPDATE invoices
-        SET org_id = (SELECT org_id FROM users WHERE users.id = invoices.user_id)
-        WHERE org_id IS NULL
-    """)
-
-    # Dashboard fields (additive — extraction/upload unaffected, they rely on
-    # these column DEFAULTs). status: paid/pending/unpaid. due_date: nullable.
-    # created_at: when the row was inserted (upload time).
-    if "status" not in existing_columns:
-        cursor.execute("ALTER TABLE invoices ADD COLUMN status TEXT DEFAULT 'pending'")
-    if "due_date" not in existing_columns:
-        cursor.execute("ALTER TABLE invoices ADD COLUMN due_date TEXT")
-    if "created_at" not in existing_columns:
-        # SQLite forbids a non-constant default (CURRENT_TIMESTAMP) in
-        # ALTER ADD COLUMN, so add it plain and backfill existing rows.
-        cursor.execute("ALTER TABLE invoices ADD COLUMN created_at TEXT")
-        cursor.execute("UPDATE invoices SET created_at = datetime('now') WHERE created_at IS NULL")
-
-    # Stamp created_at on every new insert via a trigger, so the upload flow
-    # (save_invoice) stays completely untouched.
-    cursor.execute("""
-        CREATE TRIGGER IF NOT EXISTS invoices_set_created_at
-        AFTER INSERT ON invoices
-        WHEN NEW.created_at IS NULL
-        BEGIN
-            UPDATE invoices SET created_at = datetime('now') WHERE id = NEW.id;
-        END
-    """)
-
-    # Uniqueness is now PER ORGANIZATION: teammates can't create duplicates of
-    # the same invoice within their org. Replace the old per-user index.
-    cursor.execute("DROP INDEX IF EXISTS idx_invoices_user_vendor_number")
-    cursor.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_org_vendor_number
-        ON invoices (org_id, vendor, invoice_number)
-    """)
-
-    connection.commit()
-    connection.close()
 
 
 def _invoice_to_dict(inv: Invoice) -> dict:

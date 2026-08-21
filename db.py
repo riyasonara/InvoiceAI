@@ -14,6 +14,14 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///invoice.db")
 
+# Normalize a plain "postgresql://" (or "postgres://", as some hosts issue it)
+# to explicitly request the psycopg v3 driver, which is what we install —
+# without this, SQLAlchemy defaults to the psycopg2 driver and fails to import.
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+elif DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
+
 # check_same_thread is a SQLite-only quirk (FastAPI uses multiple threads).
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 

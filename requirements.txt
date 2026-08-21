@@ -28,6 +28,12 @@ pyjwt==2.13.0
 # ORM — maps tables to Python classes; DATABASE_URL makes Postgres a config swap
 SQLAlchemy==2.0.51
 
+# Database migrations — Alembic owns the schema (see DATABASE.md)
+alembic==1.18.5
+
+# Postgres driver (production database; DATABASE_URL switches to it)
+psycopg[binary]==3.3.4
+
 # Gmail OAuth flow + Gmail API client
 google-auth-oauthlib==1.4.0
 google-api-python-client==2.198.0

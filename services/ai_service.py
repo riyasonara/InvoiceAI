@@ -4,6 +4,7 @@ from google.genai.errors import ServerError
 from pydantic import BaseModel, field_validator, ValidationError
 from dotenv import load_dotenv
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 import os
 import json
@@ -86,8 +87,9 @@ class ExtractedInvoice(BaseModel):
     vendor: Optional[str] = None
     invoice_number: Optional[str] = None
     invoice_date: Optional[str] = None
-    gst: Optional[float] = None
-    total: Optional[float] = None
+    # Decimal, not float — money must stay exact from extraction to storage.
+    gst: Optional[Decimal] = None
+    total: Optional[Decimal] = None
 
     @field_validator("vendor", "invoice_number", mode="before")
     @classmethod
@@ -106,17 +108,22 @@ class ExtractedInvoice(BaseModel):
     @field_validator("gst", "total", mode="before")
     @classmethod
     def clean_number(cls, value):
+        """Coerce money to an exact Decimal.
+
+        Parsed from the *string* form (Decimal("3600.00")) rather than via
+        float, so no binary rounding error is introduced before storage.
+        """
         if value is None:
             return None
-        if isinstance(value, (int, float)):
-            return float(value)
+        if isinstance(value, Decimal):
+            return value
         # Strip thousands separators, currency symbols, and spaces, then parse.
         cleaned = str(value).replace(",", "").replace("₹", "").replace("$", "").strip()
         if not cleaned:
             return None
         try:
-            return float(cleaned)
-        except ValueError:
+            return Decimal(cleaned)
+        except InvalidOperation:
             return None  # unparseable -> None rather than crashing the request
 
 

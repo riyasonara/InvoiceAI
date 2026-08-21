@@ -18,7 +18,6 @@ from services import billing_service
 from services.billing_service import QuotaExceeded
 import plans
 from services.email_service import (
-    create_email_tables,
     upsert_email_account,
     get_email_account,
     delete_email_account,
@@ -30,22 +29,18 @@ from services.email_service import (
 
 from services.invoice_service import process_invoice
 from services.database_service import (
-    create_database,
     get_all_invoices,
     get_invoice_by_id,
     update_invoice,
     get_dashboard_summary,
 )
 from services.user_service import (
-    create_users_table,
     create_user,
     get_user_by_email,
     get_user_by_id,
 )
 from services.organization_service import (
-    create_organizations_table,
     create_organization,
-    backfill_user_orgs,
     get_organization_by_id,
     get_organization_by_invite_code,
     list_members,
@@ -89,14 +84,10 @@ app.add_middleware(
     allow_headers=["*"],                       # allow any request headers
 )
 
-# Ensure all tables exist before any request comes in. Order matters:
-# organizations first, then users (adds org_id), then backfill existing users
-# into personal orgs, then invoices.
-create_organizations_table()
-create_users_table()
-backfill_user_orgs()
-create_database()
-create_email_tables()
+# NOTE: the database schema is owned by Alembic migrations, not by this app.
+# Run `alembic upgrade head` before starting the server. Creating tables at
+# import time was removed deliberately: it made importing the app mutate the
+# database (untestable) and hid schema changes from review.
 
 # Where to send the user's browser back to after the Gmail OAuth callback.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")

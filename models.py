@@ -1,17 +1,30 @@
-"""SQLAlchemy ORM models, mapped to the EXISTING tables (no schema change).
+"""SQLAlchemy ORM models — the single source of truth for the schema.
 
-Typed with SQLAlchemy 2.0 `Mapped[...]` for full type-hint coverage. These map
-1:1 onto the tables the raw-sqlite3 services already created, so the ORM can be
-adopted service-by-service without touching the database.
+Typed with SQLAlchemy 2.0 `Mapped[...]`. Alembic autogenerates migrations by
+diffing the live database against these definitions, so a change here plus
+`alembic revision --autogenerate` is the only supported way to evolve schema.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import ForeignKey, UniqueConstraint
+from sqlalchemy import ForeignKey, Numeric, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db import Base
+
+
+def utc_timestamp() -> str:
+    """Application-side timestamp, in the format existing rows already use.
+
+    Deliberately NOT a database trigger or server_default: the previous
+    SQLite-only trigger would silently vanish on Postgres, leaving created_at
+    NULL and breaking billing's monthly usage count. Generating it here works
+    identically on every dialect.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class Organization(Base):
@@ -61,11 +74,13 @@ class Invoice(Base):
     vendor: Mapped[Optional[str]] = mapped_column(default=None)
     invoice_number: Mapped[Optional[str]] = mapped_column(default=None)
     invoice_date: Mapped[Optional[str]] = mapped_column(default=None)
-    gst: Mapped[Optional[float]] = mapped_column(default=None)
-    total: Mapped[Optional[float]] = mapped_column(default=None)
+    # Money is NUMERIC(14,2)/Decimal, never float: binary floating point cannot
+    # represent decimal currency exactly and the error compounds across sums.
+    gst: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), default=None)
+    total: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), default=None)
     status: Mapped[Optional[str]] = mapped_column(default="pending")
     due_date: Mapped[Optional[str]] = mapped_column(default=None)
-    created_at: Mapped[Optional[str]] = mapped_column(default=None)
+    created_at: Mapped[Optional[str]] = mapped_column(default=utc_timestamp)
 
     organization: Mapped[Optional["Organization"]] = relationship(back_populates="invoices")
 

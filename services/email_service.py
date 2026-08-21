@@ -5,24 +5,10 @@ tokens — only the address / status / connected timestamp.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import inspect, text
-
-from db import Base, engine, SessionLocal
+from db import SessionLocal
 from models import EmailAccount, EmailMessage, EmailAttachment
 from services.crypto_service import encrypt, decrypt
 from services import gmail_service
-
-
-def create_email_tables():
-    """Create the email tables (idempotent), then apply additive migrations —
-    create_all never ALTERs tables that already exist.
-    """
-    Base.metadata.create_all(engine)
-
-    columns = [c["name"] for c in inspect(engine).get_columns("email_accounts")]
-    if "last_synced_at" not in columns:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE email_accounts ADD COLUMN last_synced_at TEXT"))
 
 
 def upsert_email_account(org_id, email_address, access_token, refresh_token, token_expiry):
