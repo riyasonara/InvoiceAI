@@ -67,6 +67,26 @@ def create_checkout_session(org_id, admin_email, success_url, cancel_url):
     return session.url
 
 
+def create_portal_session(org_id, return_url):
+    """A Stripe-hosted page where an admin can update their card, view past
+    invoices, or cancel — self-service, so we don't have to build any of
+    that ourselves. Returns None if this org has never checked out (no
+    Stripe Customer to manage yet).
+    """
+    db = SessionLocal()
+    try:
+        org = db.query(Organization).filter_by(id=org_id).first()
+        customer_id = org.stripe_customer_id if org else None
+    finally:
+        db.close()
+
+    if not customer_id:
+        return None
+
+    session = stripe.billing_portal.Session.create(customer=customer_id, return_url=return_url)
+    return session.url
+
+
 def construct_event(payload, sig_header):
     """Verify a webhook request actually came from Stripe. Raises
     stripe.SignatureVerificationError or ValueError if it didn't — the

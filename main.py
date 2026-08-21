@@ -447,6 +447,23 @@ def billing_checkout(current_user: dict = Depends(require_admin)):
     return {"checkout_url": checkout_url}
 
 
+@app.post("/billing/portal")
+def billing_portal(current_user: dict = Depends(require_admin)):
+    """A Stripe-hosted page to manage/cancel the subscription or update the
+    card on file. Admin-only, same reasoning as /billing/checkout.
+    """
+    if not stripe_service.is_configured():
+        raise HTTPException(status_code=503, detail="Payments are not configured on the server.")
+
+    portal_url = stripe_service.create_portal_session(
+        current_user["org_id"],
+        return_url=f"{FRONTEND_URL}/billing",
+    )
+    if portal_url is None:
+        raise HTTPException(status_code=400, detail="No billing account on file yet.")
+    return {"portal_url": portal_url}
+
+
 @app.post("/billing/webhook")
 async def billing_webhook(request: Request):
     """Stripe calls this directly — no cookie, no logged-in user. The

@@ -18,6 +18,7 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(true);
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
+  const [openingPortal, setOpeningPortal] = useState(false);
 
   async function upgrade() {
     setCheckingOut(true);
@@ -34,6 +35,24 @@ export default function BillingPage() {
     } catch {
       setCheckoutError("Could not reach the server.");
       setCheckingOut(false);
+    }
+  }
+
+  async function manageSubscription() {
+    setOpeningPortal(true);
+    setCheckoutError("");
+    try {
+      const res = await api("/billing/portal", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setCheckoutError(data.detail || "Could not open the billing portal.");
+        setOpeningPortal(false);
+        return;
+      }
+      window.location.href = data.portal_url;
+    } catch {
+      setCheckoutError("Could not reach the server.");
+      setOpeningPortal(false);
     }
   }
 
@@ -103,6 +122,14 @@ export default function BillingPage() {
             ? "Unlimited invoice processing"
             : `${usage?.invoices_remaining ?? 0} remaining this month`}
         </Typography>
+
+        {isAdmin && usage?.plan === "pro" && (
+          <Box sx={{ mt: 2 }}>
+            <Button variant="outlined" size="small" disabled={openingPortal} onClick={manageSubscription}>
+              {openingPortal ? "Opening…" : "Manage subscription"}
+            </Button>
+          </Box>
+        )}
       </Card>
 
       {/* Plan comparison */}
