@@ -13,6 +13,7 @@ import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import MailRoundedIcon from "@mui/icons-material/MailRounded";
 import CreditCardRoundedIcon from "@mui/icons-material/CreditCardRounded";
 import Brand from "./Brand";
+import ColorModeToggle from "./ColorModeToggle";
 import type { CurrentUser } from "../types";
 import type { ReactNode } from "react";
 
@@ -99,7 +100,8 @@ export default function Layout({ user, onLogout }: LayoutProps) {
             sx={{ mr: 2, display: { xs: "none", sm: "block" } }}>
             {user.email}
           </Typography>
-          <Button variant="outlined" color="inherit" size="small" onClick={onLogout}>
+          <ColorModeToggle />
+          <Button variant="outlined" color="inherit" size="small" onClick={onLogout} sx={{ ml: 1 }}>
             Log out
           </Button>
         </Toolbar>

@@ -7,6 +7,7 @@ import {
 import { api } from "../api";
 import type { CurrentUser } from "../types";
 import Brand from "../components/Brand";
+import ColorModeToggle from "../components/ColorModeToggle";
 
 interface AuthScreenProps {
   onAuthenticated: (user: CurrentUser) => void;
@@ -77,7 +78,10 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
   const isLogin = mode === "login";
 
   return (
-    <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", p: 2, bgcolor: "background.default" }}>
+    <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", p: 2, bgcolor: "background.default", position: "relative" }}>
+      <Box sx={{ position: "absolute", top: 12, right: 12 }}>
+        <ColorModeToggle />
+      </Box>
       <Card variant="outlined" sx={{ width: "100%", maxWidth: 420, p: 4 }}>
         <Brand />
         <Typography variant="h5" sx={{ fontWeight: 700, mt: 2.5 }}>

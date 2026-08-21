@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Box, Card, Typography, Button, Stack, Alert, Chip, TextField,
-  Table, TableHead, TableBody, TableRow, TableCell,
+  Table, TableHead, TableBody, TableRow, TableCell, Divider,
 } from "@mui/material";
 import SyncRoundedIcon from "@mui/icons-material/SyncRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { api } from "../api";
-import type { EmailMessage, SyncResult, ProcessResult, AttachmentStatus } from "../types";
+import type { EmailMessage, SyncResult, ProcessResult, AttachmentStatus, ProcessingLog } from "../types";
 import EmptyState from "../components/EmptyState";
 import { SkeletonLines } from "../components/Skeleton";
 
@@ -18,8 +18,14 @@ const CHIP_COLOR: Record<AttachmentStatus, "default" | "info" | "success" | "err
   failed: "error",
 };
 
+// How often to poll while something's actually happening (a sync/process
+// action in flight, or an attachment still pending/processing) — backs off
+// to not polling at all once everything's settled.
+const ACTIVE_POLL_MS = 3000;
+
 export default function EmailsPage() {
   const [emails, setEmails] = useState<EmailMessage[]>([]);
+  const [logs, setLogs] = useState<ProcessingLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -28,14 +34,35 @@ export default function EmailsPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
 
-  function load() {
+  function load(silent = false) {
+    if (!silent) setLoading(true);
     api("/emails")
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setEmails(d as EmailMessage[]))
-      .finally(() => setLoading(false));
+      .finally(() => { if (!silent) setLoading(false); });
   }
 
-  useEffect(() => { load(); }, []);
+  function loadLogs() {
+    api("/processing/jobs")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setLogs((d as ProcessingLog[]).slice(0, 8)));
+  }
+
+  useEffect(() => { load(); loadLogs(); }, []);
+
+  const hasActive = emails.some((e) =>
+    e.attachments.some((a) => a.status === "pending" || a.status === "processing"));
+
+  // Polls only while there's something to watch: a sync/process action the
+  // user just triggered, or attachments still mid-pipeline — e.g. from the
+  // background auto-sync running on its own 5-minute schedule. Each
+  // attachment's status is committed individually server-side as it
+  // changes, so this picks up real progress, not just a fixed refresh.
+  useEffect(() => {
+    if (!hasActive && !syncing && !processing) return;
+    const id = setInterval(() => { load(true); loadLogs(); }, ACTIVE_POLL_MS);
+    return () => clearInterval(id);
+  }, [hasActive, syncing, processing]);
 
   async function sync() {
     setSyncing(true);
@@ -51,6 +78,7 @@ export default function EmailsPage() {
       }
       setResult(data as SyncResult);
       load();
+      loadLogs();
       // Automation: new attachments go straight into the pipeline.
       if ((data as SyncResult).new_attachments > 0) {
         await processPending();
@@ -75,6 +103,7 @@ export default function EmailsPage() {
       }
       setProcessResult(data as ProcessResult);
       load();
+      loadLogs();
     } catch {
       setError("Could not reach the server. Is the API running on port 8000?");
     } finally {
@@ -96,7 +125,22 @@ export default function EmailsPage() {
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2}
         sx={{ mb: 3, justifyContent: "space-between", alignItems: { sm: "flex-start" } }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 700 }}>Emails</Typography>
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Typography variant="h4" sx={{ fontWeight: 700 }}>Emails</Typography>
+            {(hasActive || syncing || processing) && (
+              <Stack direction="row" spacing={0.75} sx={{
+                alignItems: "center", px: 1, py: 0.25, borderRadius: 99,
+                border: 1, borderColor: "info.main", color: "info.main",
+              }}>
+                <Box sx={{
+                  width: 6, height: 6, borderRadius: "50%", bgcolor: "info.main",
+                  animation: "pulse 1.4s ease-in-out infinite",
+                  "@keyframes pulse": { "0%, 100%": { opacity: 1 }, "50%": { opacity: 0.3 } },
+                }} />
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>Live</Typography>
+              </Stack>
+            )}
+          </Stack>
           <Typography color="text.secondary">Invoices received through your connected inbox.</Typography>
         </Box>
         <Stack direction="row" spacing={1}>
@@ -176,6 +220,36 @@ export default function EmailsPage() {
           </Box>
         )}
       </Card>
+
+      {logs.length > 0 && (
+        <Card variant="outlined" sx={{ mt: 3, p: 2 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>Recent activity</Typography>
+          <Stack divider={<Divider />} spacing={1}>
+            {logs.map((log) => (
+              <Stack key={log.id} direction="row" spacing={1.5}
+                sx={{ alignItems: "flex-start", justifyContent: "space-between" }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {log.step.replaceAll("_", " ")}
+                  </Typography>
+                  {log.message && (
+                    <Typography variant="caption" color="text.secondary" noWrap
+                      sx={{ display: "block", maxWidth: { xs: 220, sm: 480 } }}>
+                      {log.message}
+                    </Typography>
+                  )}
+                </Box>
+                <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexShrink: 0 }}>
+                  {log.status === "error" && <Chip size="small" color="error" label="error" />}
+                  <Typography variant="caption" color="text.secondary">
+                    {(log.created_at || "").slice(11, 16) || "—"}
+                  </Typography>
+                </Stack>
+              </Stack>
+            ))}
+          </Stack>
+        </Card>
+      )}
     </Box>
   );
 }

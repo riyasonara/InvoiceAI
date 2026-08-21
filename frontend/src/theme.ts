@@ -1,10 +1,10 @@
 import { createTheme } from "@mui/material/styles";
 
-// MUI theme matched to the existing design-token CSS (src/index.css) so MUI
-// components look native to the app. Light/dark follow the OS preference,
-// mirroring the current prefers-color-scheme behaviour.
+// "class"-driven color scheme (not "media"): lets useColorScheme() override
+// the OS preference and persists the user's choice to localStorage — the
+// mechanism ColorModeToggle relies on.
 const theme = createTheme({
-  cssVariables: { colorSchemeSelector: "media" },
+  cssVariables: { colorSchemeSelector: "class" },
   colorSchemes: {
     light: {
       palette: {
@@ -31,8 +31,15 @@ const theme = createTheme({
   },
   shape: { borderRadius: 12 },
   typography: {
-    fontFamily:
-      'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    fontFamily: '"Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif',
+    h1: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 700, letterSpacing: "-0.01em" },
+    h2: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 700, letterSpacing: "-0.01em" },
+    h3: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 600 },
+    h4: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 600, letterSpacing: "-0.01em" },
+    h5: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 600 },
+    h6: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 600 },
+    subtitle1: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 600 },
+    subtitle2: { fontFamily: '"Lexend", system-ui, sans-serif', fontWeight: 600 },
     button: { textTransform: "none", fontWeight: 600 },
   },
 });

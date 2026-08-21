@@ -116,6 +116,15 @@ export interface EmailMessage {
   attachments: EmailAttachment[];
 }
 
+export interface ProcessingLog {
+  id: number;
+  attachment_id: number;
+  step: string;
+  status: "info" | "error";
+  message: string | null;
+  created_at: string | null;
+}
+
 export interface SyncResult {
   scanned: number;
   new_messages: number;
