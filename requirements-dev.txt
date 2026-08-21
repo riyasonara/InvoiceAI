@@ -1,0 +1,5 @@
+# Test runner
+pytest==9.1.1
+
+# Lets FastAPI's TestClient send requests to the app in-process (no running server)
+httpx==0.28.1
