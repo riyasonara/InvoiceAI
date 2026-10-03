@@ -1,4 +1,6 @@
-export const API_URL = "http://localhost:8000";
+// Env-driven so production points at the deployed API; falls back to the
+// local backend in dev. Set VITE_API_URL at build time for production.
+export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // Every request includes credentials so the browser sends the httpOnly auth
 // cookie. Centralised so no call site can forget it.

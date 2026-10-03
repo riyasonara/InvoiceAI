@@ -9,9 +9,15 @@ from typing import Optional, Literal
 import stripe
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+
+from db import engine
 
 from services import gmail_service
 from services import processing_service
@@ -74,17 +80,44 @@ async def lifespan(app: FastAPI):
     scheduler_service.stop(sync_task)
 
 
+# --- Production-configurable settings (env-driven, dev-safe defaults) ---
+# CORS_ORIGINS: comma-separated allowlist of browser origins. Defaults to the
+# Vite dev server; in production set it to your real frontend origin(s).
+CORS_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()
+]
+# COOKIE_SECURE: send auth cookies only over HTTPS. Must be "true" in prod;
+# stays false in local dev (HTTP) so the cookie still works.
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+# RATE_LIMIT_ENABLED: lets the test suite turn limits off (set "false" there).
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
+
 # Create the application — this "app" object IS our API.
 app = FastAPI(lifespan=lifespan)
 
-# Allow our React dev server (a different origin) to call this API.
+# Rate limiter, keyed by client IP. Behind a proxy, get_remote_address reads
+# the socket peer — fine for Render where the platform sets it; tighten later
+# with X-Forwarded-For handling if needed.
+limiter = Limiter(key_func=get_remote_address, enabled=RATE_LIMIT_ENABLED)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please slow down and try again."},
+    )
+
+
+# Allow the configured frontend origin(s) to call this API with credentials.
 # Without this, the browser blocks the requests with a CORS error.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # the Vite dev server
-    allow_credentials=True,                    # allow the auth cookie to cross origins
-    allow_methods=["*"],                       # allow GET, POST, etc.
-    allow_headers=["*"],                       # allow any request headers
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,   # allow the auth cookie to cross origins
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # NOTE: the database schema is owned by Alembic migrations, not by this app.
@@ -223,6 +256,19 @@ def read_root():
     return {"message": "InvoiceAI is running"}
 
 
+# Readiness probe for the deployment platform's health check. Confirms the
+# process is up AND the database is reachable; returns 503 if the DB is down
+# so the platform doesn't route traffic to a broken instance.
+@app.get("/healthz")
+def healthz():
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database unavailable.")
+
+
 # Create a new user account.
 @app.post("/register", response_model=UserResponse, status_code=201)
 def register(request: RegisterRequest):
@@ -267,13 +313,14 @@ def register(request: RegisterRequest):
 # Log in with email + password. On success, sets the JWT in an httpOnly cookie
 # and returns the user + their organization (the token never touches the body).
 @app.post("/login", response_model=MeResponse)
-def login(request: LoginRequest, response: Response):
-    user = get_user_by_email(request.email)
+@limiter.limit("10/minute")  # brute-force protection, per client IP
+def login(request: Request, credentials: LoginRequest, response: Response):
+    user = get_user_by_email(credentials.email)
 
     # SECURITY: return the SAME vague error whether the email is unknown or the
     # password is wrong. Revealing which would let an attacker discover valid
     # emails one guess at a time.
-    if user is None or not verify_password(request.password, user["hashed_password"]):
+    if user is None or not verify_password(credentials.password, user["hashed_password"]):
         raise HTTPException(
             status_code=401,  # 401 Unauthorized
             detail="Incorrect email or password.",
@@ -288,7 +335,7 @@ def login(request: LoginRequest, response: Response):
         value=token,
         httponly=True,                             # JavaScript can't read it
         samesite="lax",                            # not sent on cross-site requests (CSRF defense)
-        secure=False,                              # DEV ONLY over HTTP; set True in production (HTTPS)
+        secure=COOKIE_SECURE,                      # HTTPS-only in production (env-driven)
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # cookie expires with the token
     )
 
@@ -299,7 +346,8 @@ def login(request: LoginRequest, response: Response):
 # server can remove it — the frontend can't do it in JavaScript.
 @app.post("/logout")
 def logout(response: Response):
-    response.delete_cookie(key="access_token")
+    # Match the attributes the cookie was set with so browsers clear it reliably.
+    response.delete_cookie(key="access_token", samesite="lax", secure=COOKIE_SECURE)
     return {"message": "Logged out."}
 
 
@@ -317,7 +365,7 @@ def gmail_connect(response: Response, current_user: dict = Depends(require_admin
     state = secrets.token_urlsafe(16)
     response.set_cookie(
         key="gmail_oauth_state", value=state,
-        httponly=True, samesite="lax", secure=False, max_age=600,
+        httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=600,
     )
     return {"auth_url": gmail_service.build_auth_url(state)}
 
@@ -636,7 +684,9 @@ ERROR_STATUS = {
 # When someone POSTs a PDF file to "/extract", run this function.
 # The file arrives as multipart/form-data; FastAPI hands it to us as an UploadFile.
 @app.post("/extract")
+@limiter.limit("20/minute")  # AI calls are costly; cap abuse per client IP
 async def extract(
+    request: Request,
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
 ):
@@ -656,15 +706,23 @@ async def extract(
             detail="Only PDF files are supported.",
         )
 
-    # Read the uploaded file's raw bytes into memory.
-    contents = await file.read()
+    # Guard 2: reject oversized uploads. First a cheap Content-Length check
+    # (spoofable, so not trusted alone), then stream the body in chunks and
+    # abort the moment it exceeds the limit — so a huge upload is never fully
+    # buffered into memory (the old `await file.read()` was a DoS vector).
+    too_large = HTTPException(status_code=413, detail="File is too large. The maximum size is 10 MB.")
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_FILE_SIZE:
+        raise too_large
 
-    # Guard 2: reject files that are too large.
-    if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413,  # 413 Content Too Large
-            detail="File is too large. The maximum size is 10 MB.",
-        )
+    contents = b""
+    while True:
+        chunk = await file.read(1024 * 1024)  # 1 MB at a time
+        if not chunk:
+            break
+        contents += chunk
+        if len(contents) > MAX_FILE_SIZE:
+            raise too_large
 
     # Write those bytes to a temporary file on disk, because our existing
     # read_pdf() expects a file PATH. This is the one place that knows about

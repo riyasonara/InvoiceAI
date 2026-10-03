@@ -42,3 +42,6 @@ cryptography==49.0.0
 
 # Stripe billing: Checkout Sessions + webhook signature verification
 stripe==15.5.1
+
+# Per-IP rate limiting on auth + extract endpoints
+slowapi==0.1.10

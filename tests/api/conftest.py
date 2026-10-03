@@ -23,6 +23,7 @@ if "test" not in TEST_DATABASE_URL.lower():
 
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["SYNC_INTERVAL_SECONDS"] = "0"  # don't let the Gmail scheduler run during tests
+os.environ["RATE_LIMIT_ENABLED"] = "false"  # tests hit /login etc. far faster than any human
 
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
