@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Box, Card, Button, TextField, Stack, Alert, Typography, useMediaQuery,
+  Box, Card, Button, TextField, Stack, Alert, Typography, Chip, useMediaQuery,
   ToggleButton, ToggleButtonGroup,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from "@mui/material";
@@ -34,6 +34,10 @@ export default function InvoicesPage() {
   const [status, setStatus] = useState("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  // Pre-applied when arriving from the dashboard's "needs review" link.
+  const [reviewFilter, setReviewFilter] = useState(
+    () => new URLSearchParams(window.location.search).get("review") === "1"
+  );
   const [listError, setListError] = useState(false);
 
   function loadInvoices() {
@@ -42,6 +46,7 @@ export default function InvoicesPage() {
     if (status !== "all") params.set("status", status);
     if (fromDate) params.set("from_date", fromDate);
     if (toDate) params.set("to_date", toDate);
+    if (reviewFilter) params.set("reviewed", "false");
     const qs = params.toString();
     setListError(false);
     return api(`/invoices${qs ? `?${qs}` : ""}`)
@@ -58,7 +63,7 @@ export default function InvoicesPage() {
     const t = setTimeout(loadInvoices, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status, fromDate, toDate]);
+  }, [search, status, fromDate, toDate, reviewFilter]);
 
   async function handleUpload() {
     if (!file) return;
@@ -126,6 +131,8 @@ export default function InvoicesPage() {
           <TextField size="small" type="date" label="To" value={toDate}
             onChange={(e) => setToDate(e.target.value)} slotProps={{ inputLabel: { shrink: true } }} />
         </Stack>
+        <Chip label="Needs review" variant={reviewFilter ? "filled" : "outlined"}
+          color={reviewFilter ? "warning" : "default"} onClick={() => setReviewFilter((v) => !v)} />
       </Stack>
 
       {/* Table */}
@@ -144,7 +151,10 @@ export default function InvoicesPage() {
               <Card key={inv.id} variant="outlined" sx={{ p: 1.5, cursor: "pointer" }}
                 onClick={() => navigate(`/invoices/${inv.id}`)}>
                 <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 0.5 }}>
-                  <Typography sx={{ fontWeight: 700 }}>{inv.invoice_number ?? "—"}</Typography>
+                  <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>
+                    <Typography sx={{ fontWeight: 700 }}>{inv.invoice_number ?? "—"}</Typography>
+                    {!inv.reviewed && <Chip size="small" color="warning" variant="outlined" label="Review" />}
+                  </Stack>
                   <StatusBadge status={inv.status} />
                 </Stack>
                 <FieldRow label="Supplier" value={inv.vendor ?? "—"} />
@@ -166,7 +176,12 @@ export default function InvoicesPage() {
               <TableBody>
                 {invoices.map((inv) => (
                   <TableRow key={inv.id} hover onClick={() => navigate(`/invoices/${inv.id}`)} sx={{ cursor: "pointer" }}>
-                    <TableCell sx={{ fontWeight: 600 }}>{inv.invoice_number ?? "—"}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>
+                        <span>{inv.invoice_number ?? "—"}</span>
+                        {!inv.reviewed && <Chip size="small" color="warning" variant="outlined" label="Review" />}
+                      </Stack>
+                    </TableCell>
                     <TableCell>{inv.vendor ?? "—"}</TableCell>
                     <TableCell>{formatMoney(inv.total)}</TableCell>
                     <TableCell>{formatDate(inv.due_date)}</TableCell>

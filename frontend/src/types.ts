@@ -57,6 +57,7 @@ export interface Invoice {
   status: InvoiceStatus;
   due_date: string | null;
   created_at: string | null;
+  reviewed: boolean;
 }
 
 export interface MonthlyPoint {
@@ -91,6 +92,7 @@ export interface DashboardSummary {
   pending_amount: number;
   unpaid_amount: number;
   unpaid_count: number;
+  needs_review: number;
   monthly_trend: MonthlyPoint[];
   status_distribution: StatusCount[];
   top_suppliers: SupplierSpend[];

@@ -80,6 +80,7 @@ export default function DashboardPage() {
   };
 
   const today = new Date().toISOString().slice(0, 10);
+  const needsReview = summary?.needs_review ?? 0;
   const overdue = invoices.filter((i) => i.due_date && i.due_date < today && i.status !== "paid");
   const recentUploads = [...invoices]
     .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))
@@ -253,10 +254,19 @@ export default function DashboardPage() {
         <Grid size={{ xs: 12, md: 4 }}>
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Notifications</Typography>
-            {loading ? <SkeletonLines count={4} /> : overdue.length === 0 && recentUploads.length === 0 ? (
-              <EmptyState icon={<TaskAltRoundedIcon fontSize="inherit" />} title="You're all caught up" message="No overdue invoices." />
+            {loading ? <SkeletonLines count={4} /> : needsReview === 0 && overdue.length === 0 && recentUploads.length === 0 ? (
+              <EmptyState icon={<TaskAltRoundedIcon fontSize="inherit" />} title="You're all caught up" message="Nothing needs review." />
             ) : (
               <List disablePadding>
+                {needsReview > 0 && (
+                  <ListItemButton onClick={() => navigate("/invoices?review=1")} sx={{ borderRadius: 1, alignItems: "flex-start" }}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "warning.main", mt: 1, mr: 1.5, flexShrink: 0 }} />
+                    <Box>
+                      <Typography variant="body2"><b>{needsReview}</b> invoice{needsReview === 1 ? "" : "s"} need review</Typography>
+                      <Typography variant="caption" color="text.secondary">AI-extracted — confirm the figures</Typography>
+                    </Box>
+                  </ListItemButton>
+                )}
                 {overdue.map((inv) => (
                   <ListItemButton key={`o-${inv.id}`} onClick={() => navigate(`/invoices/${inv.id}`)} sx={{ borderRadius: 1, alignItems: "flex-start" }}>
                     <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "error.main", mt: 1, mr: 1.5, flexShrink: 0 }} />

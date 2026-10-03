@@ -3,6 +3,7 @@ import os
 import secrets
 import tempfile
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from typing import Optional, Literal
 
 import stripe
@@ -195,11 +196,18 @@ def _me_payload(user: dict) -> dict:
     }
 
 
-# Fields the dashboard can change on an invoice. Literal gives free validation:
-# an invalid status is auto-rejected with 422.
+# Fields a human can change on an invoice. status uses Literal for free 422
+# validation; the rest are the AI-extracted fields a reviewer may need to
+# correct, plus `reviewed` to confirm the figures (human-review step).
 class InvoiceUpdate(BaseModel):
     status: Optional[Literal["paid", "pending", "unpaid"]] = None
     due_date: Optional[str] = None
+    vendor: Optional[str] = None
+    invoice_number: Optional[str] = None
+    invoice_date: Optional[str] = None
+    gst: Optional[Decimal] = None
+    total: Optional[Decimal] = None
+    reviewed: Optional[bool] = None
 
 
 # Login just needs the credentials — no min-length check here; we only
@@ -549,6 +557,7 @@ def list_invoices(
     status: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
+    reviewed: Optional[bool] = None,
 ):
     return get_all_invoices(
         current_user["org_id"],
@@ -556,6 +565,7 @@ def list_invoices(
         status=status,
         from_date=from_date,
         to_date=to_date,
+        reviewed=reviewed,
     )
 
 
@@ -588,12 +598,26 @@ def patch_invoice(
     if invoice is None:
         raise HTTPException(status_code=404, detail="Invoice not found.")
 
-    update_invoice(
-        current_user["org_id"],
-        invoice_id,
-        status=update.status,
-        due_date=update.due_date,
-    )
+    try:
+        update_invoice(
+            current_user["org_id"],
+            invoice_id,
+            status=update.status,
+            due_date=update.due_date,
+            vendor=update.vendor,
+            invoice_number=update.invoice_number,
+            invoice_date=update.invoice_date,
+            gst=update.gst,
+            total=update.total,
+            reviewed=update.reviewed,
+        )
+    except IntegrityError:
+        # Editing vendor/number to a pair that already exists in this org hits
+        # the (org, vendor, invoice_number) unique index.
+        raise HTTPException(
+            status_code=409,
+            detail="Another invoice in this workspace already has that vendor and invoice number.",
+        )
     return get_invoice_by_id(current_user["org_id"], invoice_id)
 
 

@@ -15,6 +15,7 @@ def _invoice_to_dict(inv: Invoice) -> dict:
         "status": inv.status,
         "due_date": inv.due_date,
         "created_at": inv.created_at,
+        "reviewed": inv.reviewed,
     }
 
 
@@ -35,6 +36,7 @@ def save_invoice(invoice, user_id, org_id):
             existing.gst = invoice["gst"]
             existing.total = invoice["total"]
             existing.user_id = user_id  # record the latest uploader
+            existing.reviewed = False   # figures changed → needs re-review
         else:
             db.add(Invoice(
                 user_id=user_id,
@@ -50,9 +52,9 @@ def save_invoice(invoice, user_id, org_id):
         db.close()
 
 
-def get_all_invoices(org_id, search=None, status=None, from_date=None, to_date=None):
+def get_all_invoices(org_id, search=None, status=None, from_date=None, to_date=None, reviewed=None):
     """This org's invoices, newest first, with optional search / status /
-    invoice-date-range filters.
+    invoice-date-range / reviewed filters.
     """
     db = SessionLocal()
     try:
@@ -66,6 +68,8 @@ def get_all_invoices(org_id, search=None, status=None, from_date=None, to_date=N
             query = query.filter(Invoice.invoice_date >= from_date)
         if to_date:
             query = query.filter(Invoice.invoice_date <= to_date)
+        if reviewed is not None:
+            query = query.filter(Invoice.reviewed == reviewed)
 
         rows = query.order_by(Invoice.id.desc()).all()
         return [_invoice_to_dict(inv) for inv in rows]
@@ -95,17 +99,27 @@ def get_invoice_by_id(org_id, invoice_id):
         db.close()
 
 
-def update_invoice(org_id, invoice_id, status=None, due_date=None):
-    """Update mutable dashboard fields on an invoice, scoped to the org."""
+def update_invoice(org_id, invoice_id, **fields):
+    """Update an invoice's editable fields, scoped to the org.
+
+    Only the fields passed (and not None) are changed — partial update. The
+    caller decides which are editable; this just applies what it's given.
+    Editing vendor/invoice_number can collide with the (org, vendor, number)
+    unique index, which raises IntegrityError for the web layer to turn into
+    a 409. Returns True if the invoice existed, False otherwise.
+    """
+    editable = ("status", "due_date", "vendor", "invoice_number",
+                "invoice_date", "gst", "total", "reviewed")
     db = SessionLocal()
     try:
         inv = db.query(Invoice).filter_by(org_id=org_id, id=invoice_id).first()
-        if inv is not None:
-            if status is not None:
-                inv.status = status
-            if due_date is not None:
-                inv.due_date = due_date
-            db.commit()
+        if inv is None:
+            return False
+        for name in editable:
+            if name in fields and fields[name] is not None:
+                setattr(inv, name, fields[name])
+        db.commit()
+        return True
     finally:
         db.close()
 
@@ -135,6 +149,7 @@ def get_dashboard_summary(org_id):
         pending_amount = amount_for("pending")
         unpaid_amount = amount_for("unpaid")
         unpaid_count = db.query(func.count()).filter(org_filter, Invoice.status == "unpaid").scalar()
+        needs_review = db.query(func.count()).filter(org_filter, Invoice.reviewed.is_(False)).scalar()
 
         # Monthly trend + spending, grouped by the invoice's own month (YYYY-MM).
         month = func.substr(Invoice.invoice_date, 1, 7)
@@ -168,6 +183,7 @@ def get_dashboard_summary(org_id):
             "pending_amount": pending_amount,
             "unpaid_amount": unpaid_amount,
             "unpaid_count": unpaid_count,
+            "needs_review": needs_review,
             "monthly_trend": monthly_trend,
             "status_distribution": status_distribution,
             "top_suppliers": top_suppliers,

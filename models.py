@@ -81,6 +81,10 @@ class Invoice(Base):
     status: Mapped[Optional[str]] = mapped_column(default="pending")
     due_date: Mapped[Optional[str]] = mapped_column(default=None)
     created_at: Mapped[Optional[str]] = mapped_column(default=utc_timestamp)
+    # Human-review gate: every extracted invoice starts unreviewed. Advisory
+    # only — totals still count it — but a person must confirm the AI's figures
+    # before it's trusted as final. Flipped true via PATCH /invoices/{id}.
+    reviewed: Mapped[bool] = mapped_column(default=False)
 
     organization: Mapped[Optional["Organization"]] = relationship(back_populates="invoices")
 
