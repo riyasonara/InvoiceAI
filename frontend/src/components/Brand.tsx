@@ -1,12 +1,13 @@
 import { Box, Typography } from "@mui/material";
 
 // Self-contained brand mark (no external CSS), so it works everywhere.
-export default function Brand() {
+// `compact` shows just the mark (for the collapsed sidebar rail).
+export default function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1.25 }}>
       <Box sx={{
         width: 36, height: 36, borderRadius: 2.5, display: "grid", placeItems: "center",
-        bgcolor: "primary.main", color: "primary.contrastText",
+        bgcolor: "primary.main", color: "primary.contrastText", flexShrink: 0,
       }}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -14,7 +15,9 @@ export default function Brand() {
           <path d="M9 8h6M9 12h6M9 16h4" />
         </svg>
       </Box>
-      <Typography sx={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>InvoiceAI</Typography>
+      {!compact && (
+        <Typography sx={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>InvoiceAI</Typography>
+      )}
     </Box>
   );
 }

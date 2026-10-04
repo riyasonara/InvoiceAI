@@ -93,6 +93,13 @@ export interface DashboardSummary {
   unpaid_amount: number;
   unpaid_count: number;
   needs_review: number;
+  outstanding_amount: number;
+  overdue_amount: number;
+  overdue_count: number;
+  due_week_amount: number;
+  due_week_count: number;
+  spend_this_month: number;
+  spend_last_month: number;
   monthly_trend: MonthlyPoint[];
   status_distribution: StatusCount[];
   top_suppliers: SupplierSpend[];

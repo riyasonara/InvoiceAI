@@ -2,7 +2,7 @@ import { Card, Box, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { ReactNode } from "react";
 
-type Tone = "default" | "brand" | "green" | "amber" | "red" | "indigo";
+type Tone = "default" | "brand" | "neutral" | "green" | "amber" | "red" | "indigo";
 
 interface StatCardProps {
   label: string;
@@ -20,6 +20,7 @@ export default function StatCard({ label, value, icon, tone = "default", hint }:
   const TONE_COLOR: Record<Tone, string> = {
     default: theme.palette.primary.main,
     brand: theme.palette.primary.main,
+    neutral: theme.palette.text.secondary,  // calm grey — for non-semantic metrics
     green: theme.palette.success.main,
     amber: theme.palette.warning.main,
     red: theme.palette.error.main,

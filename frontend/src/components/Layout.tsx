@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import {
-  AppBar, Box, Button, Chip, Drawer, IconButton,
+  AppBar, Box, Button, Chip, Divider, Drawer, IconButton, Tooltip,
   List, ListItemButton, ListItemIcon, ListItemText, Toolbar, Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
+import type { Theme } from "@mui/material/styles";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
+import ChevronLeftRoundedIcon from "@mui/icons-material/ChevronLeftRounded";
+import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import ReceiptLongRoundedIcon from "@mui/icons-material/ReceiptLongRounded";
 import PeopleAltRoundedIcon from "@mui/icons-material/PeopleAltRounded";
@@ -18,6 +22,8 @@ import type { CurrentUser } from "../types";
 import type { ReactNode } from "react";
 
 const DRAWER_WIDTH = 248;
+const COLLAPSED_WIDTH = 76;
+const COLLAPSE_KEY = "sidebar-collapsed";
 
 interface NavItem {
   to: string;
@@ -43,38 +49,91 @@ interface LayoutProps {
 
 export default function Layout({ user, onLogout }: LayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Desktop collapse state, remembered across visits (per-viewer convenience).
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
+  });
 
-  const drawer = (
-    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <Box sx={{ p: 2 }}>
-        <Brand />
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }
+
+  const itemSx = (mini: boolean) => ({
+    borderRadius: 2,
+    mb: 0.5,
+    py: 1,
+    px: mini ? 1.5 : 2,
+    color: "text.secondary",
+    justifyContent: mini ? "center" : "flex-start",
+    "&:hover": { bgcolor: "action.hover" },
+    "&.active": {
+      bgcolor: (t: Theme) => alpha(t.palette.primary.main, 0.14),
+      color: "primary.main",
+      "&:hover": { bgcolor: (t: Theme) => alpha(t.palette.primary.main, 0.2) },
+    },
+  });
+
+  // `mini` collapses the desktop rail to icons only. `desktop` adds the
+  // in-sidebar collapse toggle (the mobile drawer closes with the backdrop).
+  function drawerContent(mini: boolean, desktop: boolean) {
+    return (
+      <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        <Toolbar sx={{ px: mini ? 1 : 2, justifyContent: mini ? "center" : "flex-start" }}>
+          <Brand compact={mini} />
+        </Toolbar>
+        <Divider />
+
+        <List sx={{ px: 1.25, pt: 1.5, flexGrow: 1 }}>
+          {NAV.map((item) => (
+            <Tooltip key={item.to} title={mini ? item.label : ""} placement="right" arrow>
+              <ListItemButton
+                component={NavLink}
+                to={item.to}
+                end={item.end}
+                onClick={() => setMobileOpen(false)}
+                sx={itemSx(mini)}
+              >
+                <ListItemIcon sx={{ minWidth: mini ? 0 : 38, color: "inherit", justifyContent: "center" }}>
+                  {item.icon}
+                </ListItemIcon>
+                {!mini && (
+                  <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 600 } } }} />
+                )}
+              </ListItemButton>
+            </Tooltip>
+          ))}
+        </List>
+
+        <Divider />
+        <Box sx={{ p: 1.25 }}>
+          {!mini && (
+            <Chip label={user.organization.name} size="small" color="primary" variant="outlined"
+              sx={{ maxWidth: "100%", mb: 1 }} />
+          )}
+          {desktop && (
+            <Tooltip title={mini ? "Expand sidebar" : ""} placement="right" arrow>
+              <ListItemButton onClick={toggleCollapsed}
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                sx={{ ...itemSx(mini), mb: 0 }}>
+                <ListItemIcon sx={{ minWidth: mini ? 0 : 38, color: "inherit", justifyContent: "center" }}>
+                  {mini ? <ChevronRightRoundedIcon /> : <ChevronLeftRoundedIcon />}
+                </ListItemIcon>
+                {!mini && (
+                  <ListItemText primary="Collapse" slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 600 } } }} />
+                )}
+              </ListItemButton>
+            </Tooltip>
+          )}
+        </Box>
       </Box>
-      <List sx={{ px: 1, flexGrow: 1 }}>
-        {NAV.map((item) => (
-          <ListItemButton
-            key={item.to}
-            component={NavLink}
-            to={item.to}
-            end={item.end}
-            onClick={() => setMobileOpen(false)}
-            sx={{
-              borderRadius: 2,
-              mb: 0.5,
-              color: "text.secondary",
-              "&.active": { bgcolor: "action.selected", color: "primary.main" },
-            }}
-          >
-            <ListItemIcon sx={{ minWidth: 38, color: "inherit" }}>{item.icon}</ListItemIcon>
-            <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 600 } } }} />
-          </ListItemButton>
-        ))}
-      </List>
-      <Box sx={{ p: 2, borderTop: 1, borderColor: "divider" }}>
-        <Chip label={user.organization.name} size="small" color="primary" variant="outlined"
-          sx={{ maxWidth: "100%" }} />
-      </Box>
-    </Box>
-  );
+    );
+  }
+
+  const desktopWidth = collapsed ? COLLAPSED_WIDTH : DRAWER_WIDTH;
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "background.default" }}>
@@ -86,8 +145,9 @@ export default function Layout({ user, onLogout }: LayoutProps) {
           bgcolor: "background.paper",
           borderBottom: 1,
           borderColor: "divider",
-          width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
-          ml: { md: `${DRAWER_WIDTH}px` },
+          width: { md: `calc(100% - ${desktopWidth}px)` },
+          ml: { md: `${desktopWidth}px` },
+          transition: "width 0.2s ease, margin 0.2s ease",
         }}
       >
         <Toolbar>
@@ -107,7 +167,8 @@ export default function Layout({ user, onLogout }: LayoutProps) {
         </Toolbar>
       </AppBar>
 
-      <Box component="nav" sx={{ width: { md: DRAWER_WIDTH }, flexShrink: { md: 0 } }}>
+      <Box component="nav" sx={{ width: { md: desktopWidth }, flexShrink: { md: 0 },
+        transition: "width 0.2s ease" }}>
         <Drawer
           variant="temporary"
           open={mobileOpen}
@@ -118,21 +179,26 @@ export default function Layout({ user, onLogout }: LayoutProps) {
             "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box" },
           }}
         >
-          {drawer}
+          {drawerContent(false, false)}
         </Drawer>
         <Drawer
           variant="permanent"
           open
           sx={{
             display: { xs: "none", md: "block" },
-            "& .MuiDrawer-paper": { width: DRAWER_WIDTH, boxSizing: "border-box" },
+            "& .MuiDrawer-paper": {
+              width: desktopWidth, boxSizing: "border-box", overflowX: "hidden",
+              bgcolor: "background.paper", borderRight: 1, borderColor: "divider",
+              transition: "width 0.2s ease",
+            },
           }}
         >
-          {drawer}
+          {drawerContent(collapsed, true)}
         </Drawer>
       </Box>
 
-      <Box component="main" sx={{ flexGrow: 1, width: { md: `calc(100% - ${DRAWER_WIDTH}px)` } }}>
+      <Box component="main" sx={{ flexGrow: 1, width: { md: `calc(100% - ${desktopWidth}px)` },
+        transition: "width 0.2s ease" }}>
         <Toolbar />
         <Box sx={{ maxWidth: 1200, mx: "auto", p: { xs: 2, md: 4 } }}>
           <Outlet context={{ user }} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Box, Grid, Card, Typography, Button, Stack,
@@ -17,19 +18,26 @@ import EmptyState from "../components/EmptyState";
 import PageHeader from "../components/PageHeader";
 import Skeleton, { SkeletonLines } from "../components/Skeleton";
 import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
-import ApartmentRoundedIcon from "@mui/icons-material/ApartmentRounded";
 import PaidRoundedIcon from "@mui/icons-material/PaidRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import HourglassEmptyRoundedIcon from "@mui/icons-material/HourglassEmptyRounded";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
-import InboxRoundedIcon from "@mui/icons-material/InboxRounded";
-import MailOutlineRoundedIcon from "@mui/icons-material/MailOutlineRounded";
-import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 import TrendingUpRoundedIcon from "@mui/icons-material/TrendingUpRounded";
 import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
 import PieChartOutlineRoundedIcon from "@mui/icons-material/PieChartOutlineRounded";
 import EmojiEventsRoundedIcon from "@mui/icons-material/EmojiEventsRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
+
+// Small uppercase section heading — groups the page into scannable bands
+// instead of one undifferentiated pile of cards.
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <Typography variant="overline" color="text.secondary"
+      sx={{ display: "block", mb: 1.5, letterSpacing: "0.08em", fontWeight: 700 }}>
+      {children}
+    </Typography>
+  );
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -53,30 +61,34 @@ export default function DashboardPage() {
     return () => { alive = false; };
   }, []);
 
+  // IMPORTANT: with MUI cssVariables enabled, theme.palette.* returns the
+  // DEFAULT (light) literal in JS, not the active scheme's value — so colors
+  // read that way are wrong in dark mode (invisible axis text, white tooltip,
+  // over-bright grid). theme.vars.palette.* are CSS variables that adapt to
+  // the active scheme; use those for everything handed to Recharts/SVG.
+  const pal = theme.vars ? theme.vars.palette : theme.palette;
   const CHART = {
-    accent: theme.palette.primary.main,
-    // A second, still on-brand tone for the Spending bar chart (distinct
-    // from the Top Suppliers bar below, which uses the plain accent) —
-    // derived from the theme instead of an unrelated hardcoded hex.
-    bar: theme.palette.mode === "dark" ? theme.palette.primary.light : theme.palette.primary.dark,
-    grid: theme.palette.divider,
-    axis: theme.palette.text.secondary,
+    accent: pal.primary.main,
+    bar: pal.primary.light,   // a lighter on-brand tone for the spending bars
+    grid: pal.divider,
+    axis: pal.text.primary,   // adapts per scheme → readable in light and dark
+    cursor: pal.action.hover, // subtle hover tint instead of Recharts' grey box
     status: {
-      paid: theme.palette.success.main,
-      pending: theme.palette.warning.main,
-      unpaid: theme.palette.error.main,
+      paid: pal.success.main,
+      pending: pal.warning.main,
+      unpaid: pal.error.main,
     } as Record<string, string>,
   };
   const tooltipStyle = {
     contentStyle: {
-      background: theme.palette.background.paper,
-      border: `1px solid ${theme.palette.divider}`,
+      background: pal.background.paper,
+      border: `1px solid ${pal.divider}`,
       borderRadius: 10,
-      color: theme.palette.text.primary,
+      color: pal.text.primary,
       fontSize: 13,
     },
-    labelStyle: { color: theme.palette.text.secondary },
-    itemStyle: { color: theme.palette.text.primary },
+    labelStyle: { color: pal.text.secondary },
+    itemStyle: { color: pal.text.primary },
   };
 
   const today = new Date().toISOString().slice(0, 10);
@@ -87,51 +99,92 @@ export default function DashboardPage() {
     .slice(0, 3);
   const recentInvoices = invoices.slice(0, 6);
 
-  const monthlyData = (summary?.monthly_trend || []).map((m) => ({ ...m, label: monthLabel(m.month, true) }));
+  // Last 12 data points only — keeps the trend about the recent business,
+  // not skewed by one stray old invoice.
+  const monthlyData = (summary?.monthly_trend || []).slice(-12).map((m) => ({ ...m, label: monthLabel(m.month, true) }));
+
+  // Month-over-month spend direction for the headline card.
+  const spendThis = summary?.spend_this_month ?? 0;
+  const spendLast = summary?.spend_last_month ?? 0;
+  let spendHint = "vs. last month";
+  if (spendLast > 0) {
+    const pct = Math.round(((spendThis - spendLast) / spendLast) * 100);
+    spendHint = `${pct >= 0 ? "▲" : "▼"} ${Math.abs(pct)}% vs. last month`;
+  } else if (spendThis > 0) {
+    spendHint = "first month with spend";
+  }
   const statusData = (summary?.status_distribution || []).map((s) => ({ name: s.status, value: s.count }));
   const supplierData = (summary?.top_suppliers || []).map((s) => ({ name: s.vendor, amount: s.amount }));
 
   return (
     <Box>
       <PageHeader title="Dashboard" subtitle="An overview of your organization's invoices."
-        actions={<>
-          <Button component={Link} to="/invoices" variant="contained">Upload Invoice</Button>
-          <Button component={Link} to="/suppliers" variant="outlined" color="inherit">View Suppliers</Button>
-          <Button component={Link} to="/reports" variant="outlined" color="inherit">View Reports</Button>
-        </>} />
+        actions={<Button component={Link} to="/invoices" variant="contained">Upload Invoice</Button>} />
 
-      {/* Stat cards */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
+      {/* ---- Needs attention: the things that require the owner to act,
+             first thing they see. ---- */}
+      <SectionLabel>Needs attention</SectionLabel>
+      <Grid container spacing={2} sx={{ mb: 4 }}>
         {loading
-          ? Array.from({ length: 6 }).map((_, i) => (
-              <Grid key={i} size={{ xs: 12, sm: 6, md: 4 }}>
+          ? Array.from({ length: 3 }).map((_, i) => (
+              <Grid key={i} size={{ xs: 12, md: 4 }}>
                 <Card variant="outlined" sx={{ p: 2 }}><Skeleton height={52} /></Card>
               </Grid>
             ))
           : (
             <>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="brand" icon={<DescriptionRoundedIcon fontSize="inherit" />} label="Total Invoices" value={summary?.total_invoices ?? 0} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="indigo" icon={<ApartmentRoundedIcon fontSize="inherit" />} label="Total Suppliers" value={summary?.total_suppliers ?? 0} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="brand" icon={<PaidRoundedIcon fontSize="inherit" />} label="Total Amount" value={formatMoney(summary?.total_amount)} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="green" icon={<CheckCircleRoundedIcon fontSize="inherit" />} label="Paid Amount" value={formatMoney(summary?.paid_amount)} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="amber" icon={<HourglassEmptyRoundedIcon fontSize="inherit" />} label="Pending Amount" value={formatMoney(summary?.pending_amount)} /></Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}><StatCard tone="red" icon={<WarningAmberRoundedIcon fontSize="inherit" />} label="Unpaid Invoices" value={summary?.unpaid_count ?? 0} hint={`${formatMoney(summary?.unpaid_amount)} outstanding`} /></Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <StatCard tone={summary && summary.overdue_count > 0 ? "red" : "neutral"}
+                  icon={<WarningAmberRoundedIcon fontSize="inherit" />} label="Overdue"
+                  value={formatMoney(summary?.overdue_amount)}
+                  hint={`${summary?.overdue_count ?? 0} invoice${summary?.overdue_count === 1 ? "" : "s"} past due`} />
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <StatCard tone={summary && summary.due_week_count > 0 ? "amber" : "neutral"}
+                  icon={<HourglassEmptyRoundedIcon fontSize="inherit" />} label="Due this week"
+                  value={formatMoney(summary?.due_week_amount)}
+                  hint={`${summary?.due_week_count ?? 0} invoice${summary?.due_week_count === 1 ? "" : "s"} coming due`} />
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <StatCard tone={needsReview > 0 ? "amber" : "neutral"}
+                  icon={<TaskAltRoundedIcon fontSize="inherit" />} label="Needs review"
+                  value={needsReview}
+                  hint={needsReview > 0 ? "AI figures to confirm" : "all confirmed"} />
+              </Grid>
             </>
           )}
       </Grid>
 
-      {/* Email automation tiles */}
-      {!loading && summary?.email_stats && (
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="indigo" icon={<InboxRoundedIcon fontSize="inherit" />} label="Emails Synced Today" value={summary.email_stats.synced_today} /></Grid>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="green" icon={<MailOutlineRoundedIcon fontSize="inherit" />} label="Imported from Email" value={summary.email_stats.imported} /></Grid>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="red" icon={<ErrorOutlineRoundedIcon fontSize="inherit" />} label="Processing Errors" value={summary.email_stats.errors} /></Grid>
-          <Grid size={{ xs: 6, md: 3 }}><StatCard tone="amber" icon={<HourglassEmptyRoundedIcon fontSize="inherit" />} label="Pending Queue" value={summary.email_stats.pending} /></Grid>
-        </Grid>
-      )}
+      {/* ---- Money: the headline business numbers. ---- */}
+      <SectionLabel>Money</SectionLabel>
+      <Grid container spacing={2} sx={{ mb: 4 }}>
+        {loading
+          ? Array.from({ length: 3 }).map((_, i) => (
+              <Grid key={i} size={{ xs: 12, md: 4 }}>
+                <Card variant="outlined" sx={{ p: 2 }}><Skeleton height={52} /></Card>
+              </Grid>
+            ))
+          : (
+            <>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <StatCard tone="brand" icon={<PaidRoundedIcon fontSize="inherit" />} label="Outstanding"
+                  value={formatMoney(summary?.outstanding_amount)} hint="unpaid + pending" />
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <StatCard tone="neutral" icon={<PaymentsRoundedIcon fontSize="inherit" />} label="Spend this month"
+                  value={formatMoney(summary?.spend_this_month)} hint={spendHint} />
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <StatCard tone="green" icon={<CheckCircleRoundedIcon fontSize="inherit" />} label="Paid"
+                  value={formatMoney(summary?.paid_amount)} hint="all time" />
+              </Grid>
+            </>
+          )}
+      </Grid>
 
-      {/* Charts */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
+      {/* ---- Insights: charts ---- */}
+      <SectionLabel>Insights</SectionLabel>
+      <Grid container spacing={2} sx={{ mb: 4 }}>
         <Grid size={{ xs: 12, md: 6 }}>
           <Card variant="outlined" sx={{ p: 2 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Monthly Invoice Trend</Typography>
@@ -139,10 +192,10 @@ export default function DashboardPage() {
               <EmptyState icon={<TrendingUpRoundedIcon fontSize="inherit" />} title="No data yet" message="Upload invoices to see trends." />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={monthlyData} margin={{ top: 8, right: 8, bottom: 0, left: -12 }}>
+                <LineChart data={monthlyData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
                   <CartesianGrid stroke={CHART.grid} vertical={false} />
-                  <XAxis dataKey="label" stroke={CHART.axis} fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke={CHART.axis} fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <XAxis dataKey="label" tick={{ fill: CHART.axis, fontSize: 12 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: CHART.axis, fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
                   <Tooltip {...tooltipStyle} />
                   <Line type="monotone" dataKey="count" name="Invoices" stroke={CHART.accent} strokeWidth={2.5} dot={{ r: 3 }} />
                 </LineChart>
@@ -158,11 +211,11 @@ export default function DashboardPage() {
               <EmptyState icon={<PaymentsRoundedIcon fontSize="inherit" />} title="No data yet" message="Upload invoices to see spending." />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={monthlyData} margin={{ top: 8, right: 8, bottom: 0, left: -4 }}>
+                <BarChart data={monthlyData} margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
                   <CartesianGrid stroke={CHART.grid} vertical={false} />
-                  <XAxis dataKey="label" stroke={CHART.axis} fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke={CHART.axis} fontSize={12} tickLine={false} axisLine={false} width={64} tickFormatter={(v) => formatMoney(v)} />
-                  <Tooltip {...tooltipStyle} formatter={(value) => formatMoney(value as number)} />
+                  <XAxis dataKey="label" tick={{ fill: CHART.axis, fontSize: 12 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: CHART.axis, fontSize: 12 }} tickLine={false} axisLine={false} width={64} tickFormatter={(v) => formatMoney(v)} />
+                  <Tooltip {...tooltipStyle} cursor={{ fill: CHART.cursor }} formatter={(value) => formatMoney(value as number)} />
                   <Bar dataKey="amount" name="Spend" fill={CHART.bar} radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -207,11 +260,11 @@ export default function DashboardPage() {
               <EmptyState icon={<EmojiEventsRoundedIcon fontSize="inherit" />} title="No suppliers yet" message="Top suppliers appear here." />
             ) : (
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={supplierData} layout="vertical" margin={{ top: 4, right: 12, bottom: 0, left: 8 }}>
+                <BarChart data={supplierData} layout="vertical" margin={{ top: 4, right: 16, bottom: 8, left: 8 }}>
                   <CartesianGrid stroke={CHART.grid} horizontal={false} />
-                  <XAxis type="number" stroke={CHART.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => formatMoney(v)} />
-                  <YAxis type="category" dataKey="name" stroke={CHART.axis} fontSize={11} width={110} tickLine={false} axisLine={false} />
-                  <Tooltip {...tooltipStyle} formatter={(value) => formatMoney(value as number)} />
+                  <XAxis type="number" tick={{ fill: CHART.axis, fontSize: 12 }} tickLine={false} axisLine={false} tickFormatter={(v) => formatMoney(v)} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: CHART.axis, fontSize: 11 }} width={110} tickLine={false} axisLine={false} />
+                  <Tooltip {...tooltipStyle} cursor={{ fill: CHART.cursor }} formatter={(value) => formatMoney(value as number)} />
                   <Bar dataKey="amount" name="Spend" fill={CHART.accent} radius={[0, 6, 6, 0]} barSize={16} />
                 </BarChart>
               </ResponsiveContainer>
@@ -220,7 +273,8 @@ export default function DashboardPage() {
         </Grid>
       </Grid>
 
-      {/* Recent invoices + notifications */}
+      {/* ---- Activity ---- */}
+      <SectionLabel>Activity</SectionLabel>
       <Grid container spacing={2}>
         <Grid size={{ xs: 12, md: 8 }}>
           <Card variant="outlined" sx={{ p: 2 }}>
