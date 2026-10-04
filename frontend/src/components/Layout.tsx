@@ -7,8 +7,6 @@ import {
 import { alpha } from "@mui/material/styles";
 import type { Theme } from "@mui/material/styles";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
-import ChevronLeftRoundedIcon from "@mui/icons-material/ChevronLeftRounded";
-import ChevronRightRoundedIcon from "@mui/icons-material/ChevronRightRounded";
 import GridViewRoundedIcon from "@mui/icons-material/GridViewRounded";
 import ReceiptLongRoundedIcon from "@mui/icons-material/ReceiptLongRounded";
 import PeopleAltRoundedIcon from "@mui/icons-material/PeopleAltRounded";
@@ -83,7 +81,20 @@ export default function Layout({ user, onLogout }: LayoutProps) {
     return (
       <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
         <Toolbar sx={{ px: mini ? 1 : 2, justifyContent: mini ? "center" : "flex-start" }}>
-          <Brand compact={mini} />
+          {desktop ? (
+            <Tooltip title={mini ? "Expand sidebar" : "Collapse sidebar"} placement="right" arrow>
+              <Box
+                onClick={toggleCollapsed}
+                role="button"
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                sx={{ cursor: "pointer", display: "inline-flex", borderRadius: 2 }}
+              >
+                <Brand compact={mini} />
+              </Box>
+            </Tooltip>
+          ) : (
+            <Brand compact={mini} />
+          )}
         </Toolbar>
         <Divider />
 
@@ -108,27 +119,15 @@ export default function Layout({ user, onLogout }: LayoutProps) {
           ))}
         </List>
 
-        <Divider />
-        <Box sx={{ p: 1.25 }}>
-          {!mini && (
-            <Chip label={user.organization.name} size="small" color="primary" variant="outlined"
-              sx={{ maxWidth: "100%", mb: 1 }} />
-          )}
-          {desktop && (
-            <Tooltip title={mini ? "Expand sidebar" : ""} placement="right" arrow>
-              <ListItemButton onClick={toggleCollapsed}
-                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                sx={{ ...itemSx(mini), mb: 0 }}>
-                <ListItemIcon sx={{ minWidth: mini ? 0 : 38, color: "inherit", justifyContent: "center" }}>
-                  {mini ? <ChevronRightRoundedIcon /> : <ChevronLeftRoundedIcon />}
-                </ListItemIcon>
-                {!mini && (
-                  <ListItemText primary="Collapse" slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 600 } } }} />
-                )}
-              </ListItemButton>
-            </Tooltip>
-          )}
-        </Box>
+        {!mini && (
+          <>
+            <Divider />
+            <Box sx={{ p: 1.25 }}>
+              <Chip label={user.organization.name} size="small" color="primary" variant="outlined"
+                sx={{ maxWidth: "100%" }} />
+            </Box>
+          </>
+        )}
       </Box>
     );
   }
