@@ -25,7 +25,11 @@ elif DATABASE_URL.startswith("postgres://"):
 # check_same_thread is a SQLite-only quirk (FastAPI uses multiple threads).
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args, future=True)
+# pool_pre_ping: test a pooled connection with a lightweight ping before each
+# use and transparently reconnect if it's dead. Managed Postgres (e.g. Neon)
+# drops idle connections, which otherwise surfaces as random
+# "server closed the connection unexpectedly" errors on the next query.
+engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 # Base class every ORM model inherits from.

@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from sqlalchemy import func, or_, distinct
 
 from db import SessionLocal
@@ -151,6 +153,29 @@ def get_dashboard_summary(org_id):
         unpaid_count = db.query(func.count()).filter(org_filter, Invoice.status == "unpaid").scalar()
         needs_review = db.query(func.count()).filter(org_filter, Invoice.reviewed.is_(False)).scalar()
 
+        # --- Owner-facing cashflow metrics ---
+        today = date.today().isoformat()
+        week_out = (date.today() + timedelta(days=7)).isoformat()
+        this_month = date.today().strftime("%Y-%m")
+        last_month = (date.today().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        not_paid = func.coalesce(Invoice.status, "pending") != "paid"
+        has_due = (Invoice.due_date.isnot(None)) & (Invoice.due_date != "")
+        inv_month = func.substr(Invoice.invoice_date, 1, 7)
+
+        def _sum(*conds):
+            return db.query(func.coalesce(func.sum(Invoice.total), 0)).filter(org_filter, *conds).scalar()
+
+        def _count(*conds):
+            return db.query(func.count()).filter(org_filter, *conds).scalar()
+
+        outstanding_amount = _sum(not_paid)                                   # everything not yet paid
+        overdue_amount = _sum(not_paid, has_due, Invoice.due_date < today)
+        overdue_count = _count(not_paid, has_due, Invoice.due_date < today)
+        due_week_amount = _sum(not_paid, has_due, Invoice.due_date >= today, Invoice.due_date <= week_out)
+        due_week_count = _count(not_paid, has_due, Invoice.due_date >= today, Invoice.due_date <= week_out)
+        spend_this_month = _sum(inv_month == this_month)
+        spend_last_month = _sum(inv_month == last_month)
+
         # Monthly trend + spending, grouped by the invoice's own month (YYYY-MM).
         month = func.substr(Invoice.invoice_date, 1, 7)
         monthly_rows = (
@@ -184,6 +209,13 @@ def get_dashboard_summary(org_id):
             "unpaid_amount": unpaid_amount,
             "unpaid_count": unpaid_count,
             "needs_review": needs_review,
+            "outstanding_amount": outstanding_amount,
+            "overdue_amount": overdue_amount,
+            "overdue_count": overdue_count,
+            "due_week_amount": due_week_amount,
+            "due_week_count": due_week_count,
+            "spend_this_month": spend_this_month,
+            "spend_last_month": spend_last_month,
             "monthly_trend": monthly_trend,
             "status_distribution": status_distribution,
             "top_suppliers": top_suppliers,
