@@ -95,7 +95,7 @@ export default function AuthScreen({ onAuthenticated }: AuthScreenProps) {
           <TextField label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)}
             fullWidth size="small" required autoComplete="email" />
           <TextField label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-            fullWidth size="small" required autoComplete={isLogin ? "current-password" : "new-password"}
+            fullWidth size="small" required autoComplete="new-password"
             helperText={isLogin ? undefined : "At least 8 characters"} />
 
           {!isLogin && (
