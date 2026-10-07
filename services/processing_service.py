@@ -116,8 +116,58 @@ def _extract(file_bytes, mime_type, filename):
     return ai_service.extract_invoice_from_file(prompt, file_bytes, mime_type)
 
 
+def ingest_document(org_id, file_bytes, mime_type, filename, user_id=None):
+    """Source-agnostic core: turn a document's bytes into an Invoice.
+
+    Every intake source (Gmail today, WhatsApp next) downloads the bytes its
+    own way, then hands them here. This function owns only the steps that are
+    identical across sources — extract -> validate -> save — and is pure with
+    respect to the attachment tables: it never touches an EmailAttachment or a
+    WhatsAppAttachment. The caller owns status transitions, retry scheduling,
+    and logging against whichever table the bytes came from, mapping the
+    returned `code` through its own RETRYABLE_ERRORS.
+
+    Returns, on success:
+        {"success": True, "invoice_id": int, "vendor":.., "invoice_number":.., "total":..}
+    On failure:
+        {"success": False, "code": str, "error": str}
+      codes: "extraction" | "ai_unavailable" | "invalid_ai_response" | "no_invoice_data"
+    """
+    # Extract (text path for digital PDFs, else Gemini vision).
+    try:
+        result = _extract(file_bytes, mime_type, filename)
+    except Exception as exc:
+        return {"success": False, "code": "extraction", "error": f"Extraction error: {exc}"}
+
+    # The AI layer may itself report a structured failure (provider down, bad JSON).
+    if result.get("success") is False:
+        return {
+            "success": False,
+            "code": result.get("code"),
+            "error": result.get("error", "AI extraction failed"),
+        }
+
+    # Validate — must actually look like an invoice (not a logo/signature image).
+    if not (result.get("invoice_number") or result.get("total")):
+        return {"success": False, "code": "no_invoice_data", "error": "No invoice data found — not an invoice."}
+
+    save_invoice(result, user_id, org_id)
+    invoice_id = get_invoice_id(org_id, result.get("vendor"), result.get("invoice_number"))
+    return {
+        "success": True,
+        "invoice_id": invoice_id,
+        "vendor": result.get("vendor"),
+        "invoice_number": result.get("invoice_number"),
+        "total": result.get("total"),
+    }
+
+
 def process_attachment(attachment_id):
-    """Download -> extract -> validate -> save invoice. The unit a worker runs."""
+    """Download (Gmail) -> ingest. The unit a worker runs for email intake.
+
+    Download is Gmail-specific; everything after it is the shared
+    ingest_document core. Status/retry/logging stay here against EmailAttachment.
+    """
     # Load what we need, then release the session (long AI calls shouldn't hold it).
     db = SessionLocal()
     try:
@@ -147,7 +197,7 @@ def process_attachment(attachment_id):
         _fail_attachment(org_id, attachment_id, "no_account", "No connected Gmail account.")
         return {"status": "failed", "error": "no_account"}
 
-    # 1. Download
+    # 1. Download (Gmail-specific)
     try:
         creds = gmail_service.build_credentials(account["access_token"], account["refresh_token"])
         file_bytes = gmail_service.download_attachment(creds, gmail_message_id, gmail_attachment_id)
@@ -156,29 +206,17 @@ def process_attachment(attachment_id):
         _fail_attachment(org_id, attachment_id, "download", f"Download failed: {exc}")
         return {"status": "failed", "error": "download"}
 
-    # 2. Extract
-    try:
-        result = _extract(file_bytes, mime_type, filename)
-    except Exception as exc:
-        _fail_attachment(org_id, attachment_id, "extraction", f"Extraction error: {exc}")
-        return {"status": "failed", "error": "extraction"}
-
-    if result.get("success") is False:
-        code = result.get("code")
-        _fail_attachment(org_id, attachment_id, code, result.get("error", "AI extraction failed"))
-        return {"status": "failed", "error": code}
-
-    # 3. Validate — must actually look like an invoice (not a logo/signature image).
-    if not (result.get("invoice_number") or result.get("total")):
-        _fail_attachment(org_id, attachment_id, "no_invoice_data", "No invoice data found — not an invoice.")
-        return {"status": "failed", "error": "no_invoice_data"}
+    # 2. Extract -> validate -> save (shared with every other intake source).
+    outcome = ingest_document(org_id, file_bytes, mime_type, filename, user_id=None)
+    if not outcome["success"]:
+        _fail_attachment(org_id, attachment_id, outcome["code"], outcome["error"])
+        return {"status": "failed", "error": outcome["code"]}
 
     _log(org_id, attachment_id, "extracted",
-         f"Vendor {result.get('vendor')}, #{result.get('invoice_number')}, total {result.get('total')}")
+         f"Vendor {outcome['vendor']}, #{outcome['invoice_number']}, total {outcome['total']}")
 
-    # 4. Save (email-sourced -> no uploading user) + link back to the attachment.
-    save_invoice(result, None, org_id)
-    invoice_id = get_invoice_id(org_id, result.get("vendor"), result.get("invoice_number"))
+    # 3. Link the saved invoice back to the attachment.
+    invoice_id = outcome["invoice_id"]
     _set_attachment(attachment_id, "completed", invoice_id=invoice_id)
     _log(org_id, attachment_id, "completed", f"Saved invoice #{invoice_id}")
     return {"status": "completed", "invoice_id": invoice_id}

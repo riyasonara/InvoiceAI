@@ -160,3 +160,81 @@ class InvoiceProcessingLog(Base):
     status: Mapped[str] = mapped_column(default="info")  # info | error
     message: Mapped[Optional[str]] = mapped_column(default=None)
     created_at: Mapped[Optional[str]] = mapped_column(default=None)
+
+
+# ===== WhatsApp intake =====
+# WhatsApp works the opposite way to Gmail: there's no API to read a user's
+# existing chats. Instead each org gets a WhatsApp Business *number*; vendors
+# send invoices TO it, and each inbound message arrives on our webhook. These
+# tables mirror the email_* ones, and the attachments funnel into the SAME
+# processing pipeline (see services/processing_service.ingest_document).
+
+class WhatsAppAccount(Base):
+    """A connected WhatsApp Business number — one per organization.
+
+    `phone_number` is the business number messages are sent TO, so it's how an
+    inbound webhook is routed back to a tenant (the WhatsApp equivalent of
+    "which inbox"). Unique per org AND globally, so two orgs can't claim the
+    same number. In the Twilio sandbox every tester shares one number, so the
+    pilot maps a single org to it; Cloud API gives each org its own number and
+    this routing works unchanged.
+    """
+    __tablename__ = "whatsapp_accounts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), unique=True)
+    # E.164 digits, no "whatsapp:" prefix (e.g. "+14155238886").
+    phone_number: Mapped[str] = mapped_column(unique=True)
+    label: Mapped[Optional[str]] = mapped_column(default=None)
+    status: Mapped[str] = mapped_column(default="connected")
+    connected_at: Mapped[Optional[str]] = mapped_column(default=None)
+    last_received_at: Mapped[Optional[str]] = mapped_column(default=None)
+
+
+class WhatsAppMessage(Base):
+    """An inbound WhatsApp message that carried an invoice attachment."""
+    __tablename__ = "whatsapp_messages"
+    __table_args__ = (
+        # The provider's message id — dedupes webhook redeliveries (Twilio and
+        # Meta both retry), the WhatsApp equivalent of uq_message_per_account.
+        UniqueConstraint("whatsapp_account_id", "provider_message_sid", name="uq_wa_message_per_account"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
+    whatsapp_account_id: Mapped[int] = mapped_column(ForeignKey("whatsapp_accounts.id"))
+    provider_message_sid: Mapped[str] = mapped_column()
+    sender_waid: Mapped[Optional[str]] = mapped_column(default=None)   # sender's WhatsApp id/number
+    sender_name: Mapped[Optional[str]] = mapped_column(default=None)   # ProfileName, if shared
+    body: Mapped[Optional[str]] = mapped_column(default=None)          # any text alongside the file
+    received_at: Mapped[Optional[str]] = mapped_column(default=None)
+    created_at: Mapped[Optional[str]] = mapped_column(default=None)
+
+    attachments: Mapped[list["WhatsAppAttachment"]] = relationship(back_populates="message")
+
+
+class WhatsAppAttachment(Base):
+    """A media file on an inbound WhatsApp message — the unit the pipeline processes.
+
+    Unlike email (where we re-download from Gmail on each retry), WhatsApp media
+    URLs expire, so the bytes are saved at receipt and `media_path` points at
+    them — making retry a local read. Swap media_path for an object-store key
+    later without touching the pipeline.
+    """
+    __tablename__ = "whatsapp_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"))
+    whatsapp_message_id: Mapped[int] = mapped_column(ForeignKey("whatsapp_messages.id"))
+    filename: Mapped[Optional[str]] = mapped_column(default=None)
+    mime_type: Mapped[Optional[str]] = mapped_column(default=None)
+    media_path: Mapped[Optional[str]] = mapped_column(default=None)   # where the downloaded bytes live
+    size: Mapped[Optional[int]] = mapped_column(default=None)
+    status: Mapped[str] = mapped_column(default="pending")  # pending|processing|completed|failed
+    invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("invoices.id"), default=None)
+    created_at: Mapped[Optional[str]] = mapped_column(default=None)
+    # Same auto-retry contract as email attachments.
+    retry_count: Mapped[int] = mapped_column(default=0)
+    next_retry_at: Mapped[Optional[str]] = mapped_column(default=None)
+
+    message: Mapped[Optional["WhatsAppMessage"]] = relationship(back_populates="attachments")

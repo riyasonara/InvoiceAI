@@ -45,3 +45,10 @@ stripe==15.5.1
 
 # Per-IP rate limiting on auth + extract endpoints
 slowapi==0.1.10
+
+# WhatsApp intake via Twilio: inbound webhook signature verification
+twilio==9.11.2
+
+# HTTP client — download inbound WhatsApp media from Twilio's CDN
+# (also a transitive dep of twilio/google, declared here because we import it directly)
+requests==2.34.2
