@@ -35,6 +35,9 @@ from main import app  # noqa: E402
 
 TABLES = (
     "invoice_processing_logs",
+    "whatsapp_attachments",
+    "whatsapp_messages",
+    "whatsapp_accounts",
     "email_attachments",
     "email_messages",
     "email_accounts",
