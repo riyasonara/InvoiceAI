@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useOutletContext } from "react-router-dom";
 import {
-  Box, Card, Typography, Button, Alert, Stack, Chip, IconButton,
+  Box, Card, Typography, Button, Alert, Stack, Chip, IconButton, TextField,
   ToggleButton, ToggleButtonGroup, Tooltip,
   Table, TableBody, TableCell, TableHead, TableRow,
 } from "@mui/material";
@@ -21,6 +21,15 @@ interface GmailStatus {
   auto_sync_seconds?: number;
 }
 
+interface WhatsAppStatus {
+  connected: boolean;
+  configured: boolean;
+  phone_number?: string;
+  label?: string | null;
+  connected_at?: string;
+  last_received_at?: string | null;
+}
+
 export default function SettingsPage() {
   const { user } = useOutletContext<{ user: CurrentUser }>();
   const isAdmin = user.role === "admin";
@@ -32,6 +41,11 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [params] = useSearchParams();
+
+  const [wa, setWa] = useState<WhatsAppStatus | null>(null);
+  const [waLoading, setWaLoading] = useState(true);
+  const [waNumber, setWaNumber] = useState("");
+  const [waLabel, setWaLabel] = useState("");
 
   function loadStatus() {
     setLoading(true);
@@ -48,7 +62,37 @@ export default function SettingsPage() {
       .finally(() => setMembersLoading(false));
   }
 
-  useEffect(() => { loadStatus(); loadMembers(); }, []);
+  function loadWhatsApp() {
+    setWaLoading(true);
+    api("/whatsapp/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setWa(d as WhatsAppStatus | null))
+      .finally(() => setWaLoading(false));
+  }
+
+  useEffect(() => { loadStatus(); loadMembers(); loadWhatsApp(); }, []);
+
+  async function connectWhatsApp() {
+    setError("");
+    const res = await api("/whatsapp/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone_number: waNumber.trim(), label: waLabel.trim() || null }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.detail || "Could not connect WhatsApp.");
+      return;
+    }
+    setWaNumber("");
+    setWaLabel("");
+    loadWhatsApp();
+  }
+
+  async function disconnectWhatsApp() {
+    await api("/whatsapp/disconnect", { method: "POST" });
+    loadWhatsApp();
+  }
 
   async function connect() {
     const res = await api("/gmail/connect");
@@ -177,6 +221,70 @@ export default function SettingsPage() {
               ) : (
                 <Typography variant="caption" color="text.secondary">
                   Ask an admin to connect your workspace inbox.
+                </Typography>
+              )}
+            </Stack>
+          )}
+        </Card>
+
+        {/* WhatsApp */}
+        <Card variant="outlined" sx={{ p: 3 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>WhatsApp</Typography>
+
+          {waLoading ? (
+            <SkeletonLines count={2} />
+          ) : wa && !wa.configured ? (
+            <Alert severity="info">
+              WhatsApp intake isn't configured on the server yet (missing Twilio credentials).
+            </Alert>
+          ) : wa?.connected ? (
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                <Chip color="success" label="Connected" size="small" />
+                <Typography sx={{ fontFamily: "monospace" }}>{wa.phone_number}</Typography>
+                {wa.label && <Chip size="small" variant="outlined" label={wa.label} />}
+              </Stack>
+              <Typography variant="body2" color="text.secondary">
+                Send or forward invoices to this number on WhatsApp — they're read automatically
+                and appear in your Invoices list.
+                {wa.last_received_at &&
+                  ` · Last received ${String(wa.last_received_at).slice(0, 16).replace("T", " ")} UTC`}
+              </Typography>
+              {isAdmin ? (
+                <Box><Button variant="outlined" color="error" onClick={disconnectWhatsApp}>Disconnect</Button></Box>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Only admins can change the WhatsApp connection.
+                </Typography>
+              )}
+            </Stack>
+          ) : (
+            <Stack spacing={2}>
+              <Typography color="text.secondary">No WhatsApp number connected.</Typography>
+              {isAdmin ? (
+                <>
+                  <Typography variant="body2" color="text.secondary">
+                    Enter your WhatsApp Business number (in the Twilio sandbox, the sandbox number).
+                    Vendors send invoices there and they import automatically.
+                  </Typography>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: "flex-start" }}>
+                    <TextField
+                      size="small" label="WhatsApp number" placeholder="+14155238886"
+                      value={waNumber} onChange={(e) => setWaNumber(e.target.value)}
+                      sx={{ minWidth: 200 }}
+                    />
+                    <TextField
+                      size="small" label="Label (optional)" placeholder="AP inbox"
+                      value={waLabel} onChange={(e) => setWaLabel(e.target.value)}
+                    />
+                    <Button variant="contained" onClick={connectWhatsApp} disabled={!waNumber.trim()}>
+                      Connect
+                    </Button>
+                  </Stack>
+                </>
+              ) : (
+                <Typography variant="caption" color="text.secondary">
+                  Ask an admin to connect a WhatsApp number.
                 </Typography>
               )}
             </Stack>

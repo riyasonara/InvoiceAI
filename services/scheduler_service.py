@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 
-from services import billing_service, processing_service
+from services import billing_service, processing_service, whatsapp_ingest_service
 from services.email_service import list_connected_org_ids, sync_gmail
 
 logger = logging.getLogger("invoiceai.autosync")
@@ -45,6 +45,21 @@ def run_sync_cycle():
             )
         except Exception:
             logger.exception("auto-sync failed for org=%s", org_id)
+
+    # WhatsApp intake is push (the webhook stores + processes on arrival), so
+    # here we only drain anything still pending and retry due failures — the
+    # same 5-minute cadence doubles as WhatsApp's retry check too.
+    for org_id in whatsapp_ingest_service.list_whatsapp_org_ids():
+        try:
+            processed = whatsapp_ingest_service.process_pending(org_id)
+            if processed.get("processed"):
+                logger.info(
+                    "whatsapp-drain org=%s processed=%s completed=%s failed=%s",
+                    org_id, processed.get("processed", 0),
+                    processed.get("completed", 0), processed.get("failed", 0),
+                )
+        except Exception:
+            logger.exception("whatsapp drain failed for org=%s", org_id)
 
 
 async def _loop():

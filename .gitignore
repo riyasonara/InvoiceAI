@@ -50,3 +50,6 @@ TODO.md
 # Local database backups
 *.db.backup-*
 invoice.db.pre-sprint1-backup
+
+# Downloaded WhatsApp media (swap for object storage in production)
+uploads/

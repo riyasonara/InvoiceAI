@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Optional, Literal
 
 import stripe
-from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import BackgroundTasks, Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -24,6 +24,8 @@ from services import processing_service
 from services import scheduler_service
 from services import billing_service
 from services import stripe_service
+from services import whatsapp_service
+from services import whatsapp_ingest_service
 from services.billing_service import QuotaExceeded
 import plans
 from services.email_service import (
@@ -127,6 +129,12 @@ app.add_middleware(
 
 # Where to send the user's browser back to after the Gmail OAuth callback.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# WHATSAPP_WEBHOOK_URL: the exact public URL Twilio is configured to POST to.
+# Twilio signs that URL, so behind a tunnel/proxy (ngrok, Render) the URL the
+# app sees can differ — set this so signature verification uses the real one.
+# Left unset in local dev, where request.url already matches.
+WHATSAPP_WEBHOOK_URL = os.getenv("WHATSAPP_WEBHOOK_URL")
 
 
 def get_current_user(access_token: str | None = Cookie(default=None)):
@@ -248,6 +256,13 @@ class InvoiceUpdate(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+# Register this workspace's WhatsApp Business number. In the Twilio sandbox
+# this is the shared sandbox number; in production it's the org's own number.
+class WhatsAppConnectRequest(BaseModel):
+    phone_number: str = Field(min_length=5, max_length=32)
+    label: Optional[str] = None
 
 
 # When someone visits the home page ("/"), run this function.
@@ -474,6 +489,101 @@ def processing_retry(attachment_id: int, current_user: dict = Depends(get_curren
 def processing_jobs(current_user: dict = Depends(get_current_user)):
     """Recent processing-log entries (the audit trail)."""
     return processing_service.list_processing_logs(current_user["org_id"])
+
+
+# ===== WhatsApp intake =====
+# Unlike Gmail (which we poll), WhatsApp pushes: a vendor sends an invoice to
+# the workspace's WhatsApp Business number and Twilio POSTs it to the webhook
+# below. The media funnels into the SAME pipeline as uploads and email.
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Twilio calls this directly — no cookie, no logged-in user. The signature
+    check is the ONLY thing that makes the payload trustworthy (exactly like
+    the Stripe webhook), so an unverified request is rejected before we read it.
+
+    Media is downloaded synchronously (fast), but extraction is slow (Gemini),
+    so it runs as a background task AFTER we respond — otherwise Twilio would
+    time out and redeliver. Redeliveries are deduped on the message id anyway.
+    """
+    form = await request.form()
+    params = {k: str(v) for k, v in form.items()}
+    signature = request.headers.get("X-Twilio-Signature", "")
+    url = WHATSAPP_WEBHOOK_URL or str(request.url)
+    if not whatsapp_service.verify_signature(url, params, signature):
+        raise HTTPException(status_code=403, detail="Invalid webhook signature.")
+
+    num_media = int(params.get("NumMedia", "0") or 0)
+    media = [
+        {"url": params.get(f"MediaUrl{i}", ""), "content_type": params.get(f"MediaContentType{i}", "")}
+        for i in range(num_media)
+        if params.get(f"MediaUrl{i}")
+    ]
+    result = whatsapp_ingest_service.receive_inbound(
+        to_number=params.get("To", ""),
+        provider_sid=params.get("MessageSid", ""),
+        sender_waid=params.get("WaId") or params.get("From", ""),
+        sender_name=params.get("ProfileName"),
+        body=params.get("Body"),
+        media=media,
+    )
+    for attachment_id in result.get("attachment_ids", []):
+        background_tasks.add_task(whatsapp_ingest_service.process_whatsapp_attachment, attachment_id)
+
+    # Any 2xx tells Twilio "received, don't retry". No reply message is sent.
+    return Response(status_code=200)
+
+
+@app.get("/whatsapp/status")
+def whatsapp_status(current_user: dict = Depends(get_current_user)):
+    """Whether this org has a connected WhatsApp number (and whether the server
+    has Twilio credentials at all).
+    """
+    configured = whatsapp_service.is_configured()
+    account = whatsapp_ingest_service.get_account(current_user["org_id"])
+    if account is None:
+        return {"connected": False, "configured": configured}
+    return {
+        "connected": True,
+        "configured": configured,
+        "phone_number": account["phone_number"],
+        "label": account["label"],
+        "connected_at": account["connected_at"],
+        "last_received_at": account["last_received_at"],
+    }
+
+
+@app.post("/whatsapp/connect")
+def whatsapp_connect(req: WhatsAppConnectRequest, current_user: dict = Depends(require_admin)):
+    """Register the workspace's WhatsApp Business number. Admin-only, same gate
+    as Gmail/billing — this decides where the whole org's invoices come from.
+    """
+    if not whatsapp_service.is_configured():
+        raise HTTPException(status_code=503, detail="WhatsApp is not configured on the server.")
+    try:
+        account = whatsapp_ingest_service.connect_account(
+            current_user["org_id"], req.phone_number, req.label,
+        )
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="That WhatsApp number is already connected to another workspace.",
+        )
+    return {"connected": True, "phone_number": account["phone_number"], "label": account["label"]}
+
+
+@app.post("/whatsapp/disconnect")
+def whatsapp_disconnect(current_user: dict = Depends(require_admin)):
+    whatsapp_ingest_service.disconnect_account(current_user["org_id"])
+    return {"message": "WhatsApp disconnected."}
+
+
+@app.post("/whatsapp/process")
+def whatsapp_process(current_user: dict = Depends(get_current_user)):
+    """Drain this org's pending WhatsApp attachments now (plus any due retry).
+    Normally the webhook processes on arrival; this is the manual fallback.
+    """
+    return whatsapp_ingest_service.process_pending(current_user["org_id"])
 
 
 # Return the currently logged-in user together with their organization.
